@@ -61,6 +61,10 @@ Note that some versions of Python + Windows do not install numpy correctly from 
 
 The pipeline also requires **java** to be available (for parsing, tagging and morphological disambiguation). You will need binaries of Marmot and MaltParser 1.9.1 if you want to use POS tagging, morphology and parsing. These are not included in the distribution but **the script will offer to attempt to download them if they are missing**.
 
+### Model files
+
+Model files are too large to include in the standard GitHub repository. The software will offer to download the automatically. The latest models can also be downloaded manually at https://corpling.uis.georgetown.edu/amir/download/models/. 
+
 ## Command line usage
 
 ```
@@ -103,6 +107,9 @@ less common options:
 Whitespace tokenize, tokenize morphemes, add pos, lemma, morph, dep parse with automatic sentence splitting, 
 entity recognition and coref for one text file, output in default conllu format:
 > python heb_pipe.py -wtplmdec infile.txt        
+
+OR specify no processing options (automatically assumes you want all steps)
+> python heb_pipe.py infile.txt        
 
 Just tokenize a file using pipes:
 > python heb_pipe.py -wt -o pipes infile.txt       

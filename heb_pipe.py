@@ -19,6 +19,12 @@ from xrenner import Xrenner
 from lib.tokenize_rf import MultiColumnLabelEncoder, DataFrameSelector, lambda_underscore
 
 PY3 = sys.version_info[0] > 2
+
+if PY3:
+	from urllib.request import urlretrieve
+else:
+	from urllib import urlretrieve
+
 inp = input if PY3 else raw_input
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -377,6 +383,7 @@ def inject_tags(in_sgml,insertion_specs,around_tag="norm",inserted_tag="mwe"):
 def check_requirements():
 	marmot_OK = True
 	malt_OK = True
+	models_OK = True
 	marmot = marmot_path + "marmot.jar"
 	if not os.path.exists(marmot):
 		sys.stderr.write("! Marmot not found at ./bin/\n")
@@ -384,11 +391,16 @@ def check_requirements():
 	if not os.path.exists(parser_path+"maltparser-1.9.1.jar"):
 		sys.stderr.write("! Malt Parser 1.9.1 not found at ./bin/\n")
 		malt_OK = False
+	model_files = ["heb.sm" + str(sys.version_info[0]), "heb.xrm", "heb.mco", "heb.marmot", "heb.lemming"]
+	for model_file in model_files:
+		if not os.path.exists(model_dir + model_file):
+			sys.stderr.write("! Model file " + model_file + " missing in ./models/\n")
+			models_OK = False
 
-	return marmot_OK, malt_OK
+	return marmot_OK, malt_OK, models_OK
 
 
-def download_requirements(marmot_ok=True, malt_ok=True):
+def download_requirements(marmot_ok=True, malt_ok=True, models_ok=True):
 	import requests, zipfile, shutil, tarfile
 	if not PY3:
 		import StringIO
@@ -410,24 +422,36 @@ def download_requirements(marmot_ok=True, malt_ok=True):
 				trove_file = f
 		urls.append(marmot_base_url + marmot_file)
 		urls.append(marmot_base_url + trove_file)
+	if not models_ok:
+		models_base = "http://corpling.uis.georgetown.edu/amir/download/models/"
+		urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
+		urls.append(models_base + "heb.mco")
+		urls.append(models_base + "heb.xrm")
+		urls.append(models_base + "heb.lemming")
+		urls.append(models_base + "heb.marmot")
 	for u in urls:
 		sys.stderr.write("o Downloading from " + str(u) + "\n")
-		r = requests.get(u, stream=True)
-		if PY3:
-			file_contents = io.BytesIO(r.content)
+		if "corpling" in u:
+			base_name = u[u.rfind("/") + 1:]
+			urlretrieve(u,model_dir + base_name)
 		else:
-			file_contents = StringIO.StringIO(r.content)
-		if u.endswith("gz"):
-			z = tarfile.open(fileobj=file_contents, mode="r:gz")
-			z.extractall(path=bin_dir)
-		elif u.endswith("jar"):
-			if "trove" in u:
-				with open(bin_dir + "Marmot" + os.sep + "trove.jar", 'wb') as f:
-					f.write(r.content)
-			elif "marmot" in u:
-				with open(bin_dir + "Marmot" + os.sep + "marmot.jar", 'wb') as f:
-					f.write(r.content)
+			r = requests.get(u, stream=True)
+			if PY3:
+				file_contents = io.BytesIO(r.content)
+			else:
+				file_contents = StringIO.StringIO(r.content)
+			if u.endswith("gz"):
+				z = tarfile.open(fileobj=file_contents, mode="r:gz")
+				z.extractall(path=bin_dir)
+			elif u.endswith("jar"):
+				if "trove" in u:
+					with open(bin_dir + "Marmot" + os.sep + "trove.jar", 'wb') as f:
+						f.write(r.content)
+				elif "marmot" in u:
+					with open(bin_dir + "Marmot" + os.sep + "marmot.jar", 'wb') as f:
+						f.write(r.content)
 	sys.stderr.write("\n")
+	# Copy java dependency model files to tool working dirs
 	shutil.copyfile(model_dir+"heb.mco",bin_dir+"maltparser-1.9.1" + os.sep + "heb.mco")
 	shutil.copyfile(model_dir+"heb.marmot",bin_dir+"Marmot" + os.sep + "heb.marmot")
 	shutil.copyfile(model_dir+"heb.lemming",bin_dir+"Marmot" + os.sep + "heb.lemming")
@@ -535,6 +559,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
 if __name__ == "__main__":
 
+
 	if sys.version_info[0] == 2 and sys.version_info[1] < 7:
 		sys.stderr.write("Python versions below 2.7 are not supported.\n")
 		sys.stderr.write("Your Python version:\n")
@@ -603,6 +628,24 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 	if not opts.quiet:
 		log_tasks(opts)
 
+	# Check if models, Marmot and Malt Parser are available
+	if opts.pos or opts.lemma or opts.morph or opts.dependencies or opts.tokenize or opts.entities:
+		marmot_OK, malt_OK, models_OK = check_requirements()
+		if ((opts.pos or opts.lemma or opts.morph) and not marmot_OK) or (opts.dependencies and not malt_OK) or not models_OK:
+			sys.stderr.write("! You are missing required software:\n")
+			if (opts.pos or opts.lemma or opts.morph) and not marmot_OK:
+				sys.stderr.write(" - Tagging, lemmatization and morphological analysis require Marmot\n")
+			if opts.dependencies and not malt_OK:
+				sys.stderr.write(" - Parsing is specified but Malt Parser 1.9.1 is not installed\n")
+			if not models_OK:
+				sys.stderr.write(" - Model files in models/ are missing\n")
+			response = inp("Attempt to download missing files? [Y/N]\n")
+			if response.upper().strip() == "Y":
+				download_requirements(marmot_OK,malt_OK,models_OK)
+			else:
+				sys.stderr.write("Aborting\n")
+				sys.exit(0)
+
 	if dotok:  # Pre-load stacked tokenizer for entire batch
 		rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
 	else:
@@ -611,22 +654,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 		xrenner = Xrenner(model=model_dir + "heb.xrm")
 	else:
 		xrenner = None
-
-	# Check if TreeTagger and Malt Parser are available
-	if opts.pos or opts.lemma or opts.morph or opts.dependencies:
-		marmot_OK, malt_OK = check_requirements()
-		if ((opts.pos or opts.lemma or opts.morph) and not marmot_OK) or (opts.dependencies and not malt_OK):
-			sys.stderr.write("! You are missing required software:\n")
-			if (opts.pos or opts.lemma or opts.morph) and not marmot_OK:
-				sys.stderr.write(" - Tagging, lemmatization and morphological analysis require Marmot\n")
-			if opts.dependencies and not malt_OK:
-				sys.stderr.write(" - Parsing is specified but Malt Parser 1.9.1 is not installed\n")
-			response = inp("Attempt to download missing software? [Y/N]\n")
-			if response.upper().strip() == "Y":
-				download_requirements(marmot_OK,malt_OK)
-			else:
-				sys.stderr.write("Aborting\n")
-				sys.exit(0)
 
 	for infile in files:
 		base = os.path.basename(infile)
