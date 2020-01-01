@@ -423,7 +423,7 @@ def download_requirements(marmot_ok=True, malt_ok=True, models_ok=True):
 		urls.append(marmot_base_url + marmot_file)
 		urls.append(marmot_base_url + trove_file)
 	if not models_ok:
-		models_base = "http://corpling.uis.georgetown.edu/amir/download/models/"
+		models_base = "http://corpling.uis.georgetown.edu/amir/download/heb_models/"
 		urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
 		urls.append(models_base + "heb.mco")
 		urls.append(models_base + "heb.xrm")
