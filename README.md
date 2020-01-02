@@ -29,7 +29,7 @@ Zeldes, Amir (2018) A Characterwise Windowed Approach to Hebrew Morphological Se
   title     = {A CharacterwiseWindowed Approach to {H}ebrew Morphological Segmentation},
   booktitle = {Proceedings of the 15th {SIGMORPHON} Workshop on Computational Research in Phonetics, Phonology, and Morphology},
   year      = {2018},
-  pages = {101--110}
+  pages      = {101--110},
   address   = {Brussels, Belgium}
 }
 ```
