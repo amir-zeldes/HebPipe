@@ -23,10 +23,10 @@ import io, sys, re
 PY3 = sys.version_info[0] >2
 
 # characters which have to be cut off at the beginning of a word
-PChar="""\[¿¡\{\(`"‚„†‡‹‘’“”•–—›'"""
+PChar=r"""[¿¡{(`"‚„†‡‹‘’“”•'–—›«"""
 
 # characters which have to be cut off at the end of a word
-FChar=r"""'\]\}'`"\),;:!\?%‚„…†‡‰‹‘’“”•–—›'"""
+FChar=r"""'\]}'`"),;:!?%‚„…†‡‰‹‘’“”•–—›'»"""
 
 # character sequences which have to be cut off at the beginning of a word
 PClitic=''
@@ -66,7 +66,7 @@ def tokenize(text,abbr=None,add_sents=False):
 			sep1 = sep1.decode("utf8")
 			sep2 = sep2.decode("utf8")
 
-		find_tag_space = r'(<[^<> ]*) ([^<> ]*>)'
+		find_tag_space = r'(<[^<> ]*) ([^<>]*>)'
 		while re.search(find_tag_space,line) is not None:
 			line = re.sub(find_tag_space,'\1'+sep1+'\2',line)
 
@@ -85,7 +85,7 @@ def tokenize(text,abbr=None,add_sents=False):
 		line = re.sub(sep1*3 +"*",sep1,line)
 
 		units = line.split(sep1)
-		for unit in units:
+		for i, unit in enumerate(units):
 			if re.match(r"<.*>$",unit) is not None:
 				# SGML tag
 				output += unit + "\n"
@@ -114,7 +114,7 @@ def tokenize(text,abbr=None,add_sents=False):
 						m = re.match(r'(['+PChar+'])(.)',subunit)
 						if m is not None:
 							m1 = m.group(1)
-							subunit = re.sub('(['+PChar+'])(.)','\2',subunit)
+							subunit = re.sub('(['+PChar+'])(.)',r'\2',subunit)
 							output += m1 + "\n"
 							finished = 0
 						# cut off trailing punctuation
@@ -128,7 +128,7 @@ def tokenize(text,abbr=None,add_sents=False):
 						# cut off trailing periods if punctuation precedes
 						m = re.search(r'(['+FChar+'])\.$',subunit)
 						if m is not None:
-							subunit = re.sub(r'(['+FChar+'])\.$','',subunit)
+							subunit = re.sub(r'(['+FChar+'])\.$','',subunit,count=1)
 							suffix = ".\n" + suffix
 							if subunit == "":
 								subunit = m.group(1)
