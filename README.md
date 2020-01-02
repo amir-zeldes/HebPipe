@@ -24,11 +24,12 @@ To cite this work please refer to the paper about the morphological segmenter he
 Zeldes, Amir (2018) A Characterwise Windowed Approach to Hebrew Morphological Segmentation. In: *Proceedings of the 15th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology*. Brussels, Belgium.
 
 ```
-@InProceedings{,
+@InProceedings{Zeldes2018,
   author    = {Amir Zeldes},
   title     = {A CharacterwiseWindowed Approach to {H}ebrew Morphological Segmentation},
   booktitle = {Proceedings of the 15th {SIGMORPHON} Workshop on Computational Research in Phonetics, Phonology, and Morphology},
   year      = {2018},
+  pages = {101--110}
   address   = {Brussels, Belgium}
 }
 ```
