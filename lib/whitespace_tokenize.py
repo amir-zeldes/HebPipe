@@ -20,22 +20,22 @@
 from argparse import ArgumentParser
 import io, sys, re
 
-PY3 = sys.version_info[0] >2
+PY3 = sys.version_info[0] > 2
 
 # characters which have to be cut off at the beginning of a word
-PChar=r"""[¿¡{(`"‚„†‡‹‘’“”•'–—›«"""
+PChar = r"""[¿¡{(`"‚„†‡‹‘’“”•'–—›«「"""
 
 # characters which have to be cut off at the end of a word
-FChar=r"""'\]}'`"),;:!?%‚„…†‡‰‹‘’“”•–—›'»"""
+FChar = r"""'\]}'`"),;:!?%‚„…†‡‰‹‘’“”•–—›'»」"""
 
 # character sequences which have to be cut off at the beginning of a word
-PClitic=''
+PClitic = ""
 
 # character sequences which have to be cut off at the end of a word
 FClitic = ""
 
 
-def tokenize(text,abbr=None,add_sents=False):
+def tokenize(text, abbr=None, add_sents=False):
 
 	output = ""
 	if add_sents:
@@ -93,9 +93,12 @@ def tokenize(text,abbr=None,add_sents=False):
 				#add a blank at the beginning and the end of each segment
 				email = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
 				url = r'https?://(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&/=]*)'
+				acro = r"([A-Z]\.([A-Z]\.)+)"
+				short_url = r"[-a-zA-Z0-9]{2,256}\.(com|org|edu|co|io|net)"
 
 				# insert missing blanks after punctuation if not an abbreviation
-				if unit not in Token and re.search(email,unit) is None and re.search(url,unit) is None:
+				if unit not in Token and re.search(email,unit) is None and re.search(url,unit) is None \
+					and re.search(acro, unit) is None and re.search(short_url, unit) is None:
 					unit = " " + unit + " "
 					unit = re.sub(r'\.\.\.'," ... ",unit)
 					unit = re.sub(r'([;!?])([^ ])',r'\1 \2', unit)
@@ -114,7 +117,7 @@ def tokenize(text,abbr=None,add_sents=False):
 						m = re.match(r'(['+PChar+'])(.)',subunit)
 						if m is not None:
 							m1 = m.group(1)
-							subunit = re.sub('(['+PChar+'])(.)',r'\2',subunit)
+							subunit = re.sub('^(['+PChar+'])(.)',r'\2',subunit)
 							output += m1 + "\n"
 							finished = 0
 						# cut off trailing punctuation
