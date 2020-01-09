@@ -175,7 +175,7 @@ def tokenize(text,abbr=None,add_sents=False):
 							output += m.group(1) + "\n"
 
 					while re.search(r'(.)(--)$',subunit) is not None:
-						m = re.match(r'(.)(--)$',subunit)
+						m = re.search(r'(.)(--)$',subunit)
 						subunit = re.sub(r'(.)(--)$',r'\1',subunit)
 						suffix = m.group(2) + "\n" + suffix
 
