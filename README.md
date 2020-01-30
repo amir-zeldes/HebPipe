@@ -1,6 +1,6 @@
 # HebPipe Hebrew NLP Pipeline
 
-An simple NLP pipeline for Hebrew text in UTF-8 encoding, using standard components. Basic features:
+A simple NLP pipeline for Hebrew text in UTF-8 encoding, using standard components. Basic features:
 
   * Performs end to end processing, optionally skipping steps as needed:
     * whitespace tokenization
@@ -64,7 +64,7 @@ The pipeline also requires **java** to be available (for parsing, tagging and mo
 
 ### Model files
 
-Model files are too large to include in the standard GitHub repository. The software will offer to download the automatically. The latest models can also be downloaded manually at https://corpling.uis.georgetown.edu/amir/download/models/. 
+Model files are too large to include in the standard GitHub repository. The software will offer to download the automatically. The latest models can also be downloaded manually at https://corpling.uis.georgetown.edu/amir/download/heb_models/. 
 
 ## Command line usage
 
@@ -132,7 +132,3 @@ The pipeline accepts the following kinds of input:
   * Gold super-tokenized: if whitespace tokenization is already done, you can leave out `-w`. The system expect one super-token per line in this case (e.g. <bbyt> is on one line)
   * Gold tokenized: if gold morphological segmentation is already done, you can input one gold token per line.
   * XML sentence tags in input: use -s TAGNAME to indicate an XML tag providing gold sentence boundaries.
-
-## Tools used
-
-Currently the following tools are 
