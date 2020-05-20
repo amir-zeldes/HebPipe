@@ -46,13 +46,12 @@ Zeldes, Amir (2018) A Characterwise Windowed Approach to Hebrew Morphological Se
 The NLP pipeline will run on Python 2.7+ or Python 3.5+ (2.6 and lower are not supported). Required libraries:
 
   * requests
-  * numpy
   * pandas
   * depedit
   * xrenner
-  * scikit-learn==0.19.0
+  * rftokenizer
 
-You should be able to install these manually via pip if necessary (i.e. `pip install scikit-learn==0.19.0` etc.).
+You should be able to install these manually via pip if necessary (i.e. `pip install rftokenizer` etc.).
 
 Note that some versions of Python + Windows do not install numpy correctly from pip, in which case you can download compiled binaries for your version of Python + Windows here: https://www.lfd.uci.edu/~gohlke/pythonlibs/, then run for example:
 

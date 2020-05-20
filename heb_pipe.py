@@ -6,17 +6,14 @@ import tempfile
 import subprocess
 from glob import glob
 
+from rftokenizer import RFTokenizer
+from xrenner import Xrenner
 from lib._version import __version__
-from lib.tokenize_rf import RFTokenizer
 from lib.tt2conll import conllize
 from lib.depedit import DepEdit
 from lib.append_column import inject_col
 from lib.sent_split import toks_to_sents
 from lib.whitespace_tokenize import tokenize as whitespace_tokenize
-from xrenner import Xrenner
-
-# Import pickled classes for RFTokenizer
-from lib.tokenize_rf import MultiColumnLabelEncoder, DataFrameSelector, lambda_underscore
 
 PY3 = sys.version_info[0] > 2
 
@@ -466,7 +463,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 	if preloaded is not None:
 		rf_tok, xrenner = preloaded
 	else:
-		rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
+		rf_tok = RFTokenizer(model="heb")
 		xrenner = Xrenner(model=model_dir + "heb.xrm")
 
 	if do_whitespace:
@@ -647,7 +644,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 				sys.exit(0)
 
 	if dotok:  # Pre-load stacked tokenizer for entire batch
-		rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
+		rf_tok = RFTokenizer(model="heb")
 	else:
 		rf_tok = None
 	if opts.entities:  # Pre-load stacked tokenizer for entire batch
