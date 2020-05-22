@@ -3,5 +3,6 @@ depedit
 xrenner
 pandas
 scipy
+xgboost==0.81
 rftokenizer
 joblib
