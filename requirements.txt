@@ -2,4 +2,6 @@ requests
 depedit
 xrenner
 pandas
+scipy
 rftokenizer
+joblib

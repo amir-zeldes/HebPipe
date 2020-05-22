@@ -50,6 +50,8 @@ The NLP pipeline will run on Python 2.7+ or Python 3.5+ (2.6 and lower are not s
   * depedit
   * xrenner
   * rftokenizer
+  * scipy
+  * joblib
 
 You should be able to install these manually via pip if necessary (i.e. `pip install rftokenizer` etc.).
 
