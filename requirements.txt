@@ -1,8 +1,9 @@
 requests
-depedit
-xrenner
-pandas
-scipy
 xgboost==0.81
 rftokenizer
+numpy
+scipy
+depedit
+pandas
 joblib
+xmltodict

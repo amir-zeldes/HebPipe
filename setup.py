@@ -8,7 +8,7 @@ setup(
   author = 'Amir Zeldes',
   author_email = 'amir.zeldes@georgetown.edu',
   package_data = {'':['README.md','LICENSE.txt'],'hebpipe':['lib/*','data/*','bin/*']},
-   install_requires=['xgboost==0.81','rftokenizer','depedit','xrenner','pandas','scipy','joblib'],
+   install_requires=['numpy','pandas','scipy','joblib','xgboost==0.81','rftokenizer','depedit','xmltodict'],
   url = 'https://github.com/amir-zeldes/HebPipe',
   license='Apache License, Version 2.0',
   download_url = 'https://github.com/amir-zeldes/HebPipe/releases/tag/v1.0.0.0',
