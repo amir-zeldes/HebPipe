@@ -23,7 +23,7 @@ import io, sys, re
 PY3 = sys.version_info[0] > 2
 
 # characters which have to be cut off at the beginning of a word
-PChar = r"""[¿¡{(`"‚„†‡‹‘’“”•'–—›«「"""
+PChar = r"""\[¿¡{(`"‚„†‡‹‘’“”•'–—›«「"""
 
 # characters which have to be cut off at the end of a word
 FChar = r"""'\]}'`"),;:!?%‚„…†‡‰‹‘’“”•–—›'»」"""
