@@ -1,0 +1,8 @@
+Georgetown University Multilayer corpus (GUM)
+
+License and attribution information
+
+GUM is made available under a Creative Commons license in keeping with the underlying texts. The documents from Wikimedia (Wikinews, including interviews, and Wikivoyage) are available under a CC-BY attribution license. However wikiHow texts are made available under a CC-BY-NC-SA license (non-commercial, share alike), meaning that commercial and/or non-open source use of those texts is prohibited. When using the data, please make sure to cite the sources of the texts as required by their source sites, and give credit to the GUM annotators, which are listed online, for the annotated data.
+
+For a current list of annotators see:
+http://corpling.uis.georgetown.edu/gum/

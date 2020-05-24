@@ -1,0 +1,5 @@
+DBpedia
+=======
+Content licensed under the terms of the Creative Commons Attribution-ShareAlike 3.0 License and the GNU Free Documentation License.
+
+See http://wiki.dbpedia.org/about

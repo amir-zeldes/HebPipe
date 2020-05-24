@@ -1,0 +1,9 @@
+UK Web as Corpus (UKWAC)
+=======================
+Freely available Web corpus harvested from .uk domains as part of the WaCky peoject - The Web-As-Corpus Kool Yinitiative. For further details see:
+
+http://wacky.sslmit.unibo.it/
+
+And:
+
+M. Baroni, S. Bernardini, A. Ferraresi and E. Zanchetta. 2009. The WaCky Wide Web: A Collection of Very Large Linguistically Processed Web-Crawled Corpora. Language Resources and Evaluation 43 (3): 209-226. 
