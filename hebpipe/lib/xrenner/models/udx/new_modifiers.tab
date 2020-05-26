@@ -1,0 +1,5 @@
+# Lists modifiers with freqs, which are often appended only on a subsequent mention
+# Use if prohibiting new modifiers in subsequent mentions but allowing exceptions (this list)
+Mr.	2070
+Dr.	32
+$	10

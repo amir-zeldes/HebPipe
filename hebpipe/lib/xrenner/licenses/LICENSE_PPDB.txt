@@ -1,0 +1,5 @@
+PPDB: The Paraphrase Database
+=======
+PPDB is licensed under a Creative Commons Attribution 3.0 Unported License.	
+
+See http://www.cis.upenn.edu/~ccb/ppdb/

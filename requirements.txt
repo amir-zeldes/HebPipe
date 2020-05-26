@@ -1,6 +1,9 @@
 requests
-depedit
-xrenner
+xgboost==0.81
+rftokenizer
 numpy
+scipy
+depedit
 pandas
-scikit-learn==0.19.0
+joblib
+xmltodict

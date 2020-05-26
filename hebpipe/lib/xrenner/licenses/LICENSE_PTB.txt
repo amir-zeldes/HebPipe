@@ -1,0 +1,5 @@
+Wall Street Journal corpus / Penn Treebank
+===============================
+Marcus, Mitchell, et al. Treebank-3 LDC99T42. Web Download. Philadelphia: Linguistic Data Consortium, 1999.
+Derived data provided for non-commercial use under the LDC User Agreement for Non-Members
+See: https://catalog.ldc.upenn.edu/license/ldc-non-members-agreement.pdf

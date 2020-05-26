@@ -1,0 +1,4 @@
+Word similarities for English are partly derived from the Google News vectors, based on the Google News dataset (about 100 billion words). The vector data is available under the Apache 2.0 license (see https://code.google.com/archive/p/word2vec/). For more details see: Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg Corrado, and Jeffrey Dean. Distributed Representations of Words and Phrases and their Compositionality. In Proceedings of NIPS, 2013.
+
+For the Apache 2.0 license, see http://www.apache.org/licenses/LICENSE-2.0.
+
