@@ -553,7 +553,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 			return tagged
 
 
-if __name__ == "__main__":
+def run_hebpipe():
 
 
 	if sys.version_info[0] == 2 and sys.version_info[1] < 7:
@@ -683,3 +683,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
 	fileword = " files\n\n" if len(files) > 1 else " file\n\n"
 	sys.stderr.write("\nFinished processing " + str(len(files)) + fileword)
+
+if __name__ == "__main__":
+	run_hebpipe()
