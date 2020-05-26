@@ -1,0 +1,14 @@
+#first match identical proper markables
+form="proper";form="proper"&text=$1&take_first;100;nopropagate
+#attach reflexives first
+func=/refl/;func=/nsubj/&sameparent&take_first;0;propagate
+#propagate entity type across apposition; first if entity is same, then for non-organizations to prevent "politician (party)" being appos identical
+func="appos"&pos!="NUM"&anytext;has_child_func="appos"&entity=$1&anytext&anyagree&take_first;0;propagate
+#prefer pronouns to corefer to identical pronouns in same or previous sentence
+form="pronoun";text=$1&!sameparent*;0;propagate
+#prefer pronouns to corefer to subjects in previous sentence
+form="pronoun";func=/nsubj/&!sameparent*;1;propagate
+#allow coreference between nouns and their nsubj dependents
+pos=/N(PROP)?/&has_child_func!="neg";func=/nsubj/&head=$1&anytext&anyagree;0;propagate
+#default rule
+none;none;15;nopropagate

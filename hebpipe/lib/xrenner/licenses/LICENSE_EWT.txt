@@ -1,0 +1,5 @@
+English Web Treebank
+===============================
+Bies, Ann, et al. English Web Treebank LDC2012T13. Web Download. Philadelphia: Linguistic Data Consortium, 2012.
+Derived data provided for non-commercial use under the LDC User Agreement for Non-Members
+See: https://catalog.ldc.upenn.edu/license/ldc-non-members-agreement.pdf

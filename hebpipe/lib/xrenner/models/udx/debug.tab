@@ -1,0 +1,4 @@
+ante	some antecedent text
+ana	some anaphor text
+ablations	none
+#possible_ablations	no_cardinality,no_isa,no_antonyms,no_entity_deps,no_subclasses

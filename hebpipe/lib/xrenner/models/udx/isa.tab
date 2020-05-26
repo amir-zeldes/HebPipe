@@ -1,0 +1,10 @@
+# This table allows three kinds of mappings:
+# 1: From major class to comma separated lemmas (place -> place,location)
+# 2: From subclass to comma separated lemmas (city -> place,location,burg,metropolis...)
+# 3: From markable string to comma separated markable strings (United States -> USA,US,America...)
+# Suffix a ,* to an entry to show that it may ignore morphological agreement matching for subclass search
+Álvaro Uribe	president
+10gb	10gbit
+America	United States,US,USA,U.S.,U.S.A.
+USA	United States,America,US,U.S.A.,U.S.
+team	team,*
