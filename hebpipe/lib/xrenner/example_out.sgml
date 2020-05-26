@@ -1,0 +1,527 @@
+<referent id="referent_2" entity="place" group="2">
+New
+Zealand
+</referent>
+begins
+process
+to
+consider
+changing
+national
+flag
+design
+<referent id="referent_6" entity="time" group="6">
+Thursday
+</referent>
+,
+<referent id="referent_8" entity="time" group="6" antecedent="referent_6" type="appos">
+May
+7
+,
+2015
+</referent>
+On
+Tuesday
+,
+<referent id="referent_12" entity="organization" group="12">
+the
+<referent id="referent_11" entity="place" group="2" antecedent="referent_2" type="coref">
+New
+Zealand
+</referent>
+government
+</referent>
+announced
+the
+start
+of
+<referent id="referent_14" entity="abstract" group="14">
+a
+public
+process
+to
+suggest
+<referent id="referent_15" entity="abstract" group="15">
+designs
+for
+<referent id="referent_16" entity="object" group="16">
+a
+new
+national
+flag
+</referent>
+</referent>
+,
+and
+determine
+whether
+<referent id="referent_17" entity="abstract" group="15" antecedent="referent_15" type="ana">
+their
+</referent>
+citizens
+would
+prefer
+a
+different
+national
+flag
+over
+<referent id="referent_20" entity="object" group="20">
+the
+current
+one
+</referent>
+</referent>
+.
+<referent id="referent_21" entity="object" group="20" antecedent="referent_20" type="coref">
+The
+current
+flag
+of
+<referent id="referent_22" entity="place" group="2" antecedent="referent_11" type="coref">
+New
+Zealand
+</referent>
+</referent>
+.
+<referent id="referent_24" entity="object" group="20" antecedent="referent_21" type="coref">
+The
+current
+<referent id="referent_23" entity="place" group="2" antecedent="referent_22" type="coref">
+New
+Zealand
+</referent>
+flag
+</referent>
+is
+partially
+based
+on
+<referent id="referent_26" entity="object" group="16" antecedent="referent_16" type="coref">
+the
+United
+Kingdom
+'s
+flag
+</referent>
+;
+<referent id="referent_27" entity="object" group="16" antecedent="referent_26" type="coref">
+the
+new
+one
+</referent>
+would
+be
+unique
+to
+<referent id="referent_28" entity="place" group="2" antecedent="referent_23" type="coref">
+New
+Zealand
+</referent>
+.
+<referent id="referent_32" entity="abstract" group="32">
+The
+government
+'s
+<referent id="referent_30" entity="object" group="20" antecedent="referent_24" type="coref">
+Flag
+</referent>
+Consideration
+Project
+</referent>
+has
+planned
+a
+number
+of
+conferences
+and
+roadshows
+as
+part
+of
+<referent id="referent_36" entity="abstract" group="14" antecedent="referent_14" type="coref">
+this
+process
+</referent>
+,
+with
+the
+first
+meeting
+set
+to
+take
+place
+in
+Christchurch
+on
+May
+16
+.
+According
+to
+the
+<referent id="referent_40" entity="place" group="2" antecedent="referent_28" type="coref">
+New
+Zealand
+</referent>
+Herald
+,
+<referent id="env" entity="person" group="42">
+<referent id="referent_42" entity="person" group="1084">
+Emeritus
+Professor
+John
+Burrows
+</referent>
+,
+<referent id="referent_43" entity="person" group="1084" antecedent="referent_42" type="appos">
+the
+chairman
+of
+the
+<referent id="referent_44" entity="abstract" group="32" antecedent="referent_32" type="coref">
+project
+</referent>
+'s
+panel
+of
+twelve
+</referent>
+,
+</referent>
+said
+<referent id="referent_47" entity="place" group="2" antecedent="referent_40" type="coref">
+New
+Zealand
+</referent>
+'s
+flag
+has
+never
+before
+been
+open
+to
+public
+choice
+.
+<referent id="referent_50" entity="person" group="42" antecedent="env" type="coref">
+Professor
+Burrows
+</referent>
+also
+said
+resources
+and
+kits
+would
+be
+accessible
+for
+schools
+and
+communities
+,
+"
+For
+example
+,
+<referent id="referent_57" entity="organization" group="57">
+schools
+</referent>
+can
+run
+<referent id="referent_58" entity="organization" group="57" antecedent="referent_57" type="ana">
+their
+</referent>
+own
+flag
+discussions
+and
+referendums
+to
+mirror
+the
+formal
+process
+as
+part
+of
+<referent id="referent_64" entity="organization" group="57" antecedent="referent_58" type="ana">
+their
+</referent>
+own
+learning
+exercise
+"
+.
+<referent id="referent_67" entity="person" group="67">
+People
+</referent>
+were
+encouraged
+to
+submit
+<referent id="referent_68" entity="person" group="67" antecedent="referent_67" type="ana">
+their
+</referent>
+designs
+online
+at
+www.flag.govt.nz
+and
+suggest
+what
+<referent id="referent_71" entity="object" group="16" antecedent="referent_27" type="coref">
+the
+flag
+</referent>
+should
+mean
+on
+www.standfor.co.nz
+.
+<referent id="referent_73" entity="abstract" group="73">
+Names
+of
+participants
+</referent>
+would
+be
+engraved
+,
+at
+<referent id="referent_75" entity="abstract" group="73" antecedent="referent_73" type="ana">
+their
+</referent>
+option
+,
+on
+a
+flag
+pole
+monument
+to
+be
+built
+in
+<referent id="referent_80" entity="place" group="80">
+the
+nation
+'s
+capital
+</referent>
+,
+<referent id="referent_81" entity="place" group="80" antecedent="referent_80" type="appos">
+Wellington
+</referent>
+.
+<referent id="referent_82" entity="person" group="82">
+New
+Zealand
+'s
+Prime
+Minister
+John
+Key
+</referent>
+said
+<referent id="referent_83" entity="person" group="82" antecedent="referent_82" type="ana">
+he
+</referent>
+believes
+redesigning
+<referent id="referent_84" entity="object" group="16" antecedent="referent_71" type="coref">
+the
+flag
+</referent>
+now
+has
+a
+"
+strong
+rationale
+"
+.
+<referent id="referent_86" entity="person" group="82" antecedent="referent_83" type="coref">
+Mr
+Key
+</referent>
+promoted
+the
+campaign
+for
+a
+unique
+<referent id="referent_88" entity="place" group="2" antecedent="referent_47" type="coref">
+New
+Zealand
+</referent>
+flag
+on
+<referent id="referent_91" entity="time" group="91">
+Waitangi
+Day
+</referent>
+-
+<referent id="referent_93" entity="time" group="91" antecedent="referent_91" type="appos">
+February
+6
+</referent>
+-
+this
+year
+.
+Of
+the
+public
+process
+,
+<referent id="referent_96" entity="person" group="82" antecedent="referent_86" type="ana">
+he
+</referent>
+said
+,
+"
+In
+the
+end
+<referent id="referent_97" entity="person" group="82" antecedent="referent_96" type="ana">
+I
+</referent>
+'ll
+have
+one
+vote
+in
+each
+referendum
+just
+like
+every
+other
+New
+Zealander
+on
+the
+electoral
+roll
+"
+.
+<referent id="referent_103" entity="organization" group="12" antecedent="referent_12" type="coref">
+The
+<referent id="referent_102" entity="place" group="2" antecedent="referent_88" type="coref">
+New
+Zealand
+</referent>
+government
+</referent>
+intends
+to
+hold
+two
+referendums
+to
+reach
+a
+verdict
+on
+<referent id="referent_106" entity="object" group="16" antecedent="referent_84" type="coref">
+the
+flag
+</referent>
+,
+at
+an
+estimated
+cost
+of
+NZ
+$
+26
+million
+,
+although
+a
+recent
+poll
+found
+only
+a
+quarter
+of
+citizens
+favoured
+changing
+<referent id="referent_113" entity="object" group="16" antecedent="referent_106" type="coref">
+the
+flag
+</referent>
+.
+This
+is
+a
+decrease
+from
+the
+year
+before
+,
+when
+it
+was
+forty
+percent
+.
+The
+first
+referendum
+is
+to
+be
+held
+from
+November
+20
+to
+December
+11
+,
+selecting
+a
+single
+new
+flag
+design
+out
+of
+about
+four
+finalists
+.
+<referent id="referent_126" entity="person" group="126">
+Voters
+</referent>
+would
+then
+choose
+between
+<referent id="referent_127" entity="object" group="16" antecedent="referent_113" type="coref">
+the
+new
+flag
+</referent>
+and
+<referent id="referent_130" entity="object" group="20" antecedent="referent_30" type="coref">
+<referent id="referent_129" entity="person" group="126" antecedent="referent_126" type="ana">
+their
+</referent>
+current
+flag
+</referent>
+early
+in
+2016
+.
