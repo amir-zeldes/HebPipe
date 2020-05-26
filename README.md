@@ -40,6 +40,10 @@ Either install from PyPI using pip:
 
 `pip install hebpipe`
 
+And run as a module:
+
+`python -m hebpipe example_in.txt`
+
 Or install manually: 
 
   * Clone this repository into the directory that the script should run in (git clone https://github.com/amir-zeldes/HebPipe)

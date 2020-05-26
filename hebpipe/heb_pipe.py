@@ -7,12 +7,21 @@ import subprocess
 from glob import glob
 
 from rftokenizer import RFTokenizer
-from lib.xrenner import Xrenner
-from lib._version import __version__
-from lib.tt2conll import conllize
-from lib.append_column import inject_col
-from lib.sent_split import toks_to_sents
-from lib.whitespace_tokenize import tokenize as whitespace_tokenize
+try:  # Module usage
+	from .lib.xrenner import Xrenner
+	from .lib._version import __version__
+	from .lib.tt2conll import conllize
+	from .lib.append_column import inject_col
+	from .lib.sent_split import toks_to_sents
+	from .lib.whitespace_tokenize import tokenize as whitespace_tokenize
+except ImportError:  # direct script usage
+	from lib.xrenner import Xrenner
+	from lib._version import __version__
+	from lib.tt2conll import conllize
+	from lib.append_column import inject_col
+	from lib.sent_split import toks_to_sents
+	from lib.whitespace_tokenize import tokenize as whitespace_tokenize
+
 
 PY3 = sys.version_info[0] > 2
 
@@ -553,7 +562,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 			return tagged
 
 
-if __name__ == "__main__":
+def run_hebpipe():
 
 
 	if sys.version_info[0] == 2 and sys.version_info[1] < 7:
@@ -617,7 +626,10 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 	dotok = opts.tokenize
 
 	if not opts.quiet:
-		from lib import timing
+		try:
+			from .lib import timing
+		except ImportError:  # direct script usage
+			from lib import timing
 
 	files = glob(opts.files)
 
@@ -683,3 +695,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
 	fileword = " files\n\n" if len(files) > 1 else " file\n\n"
 	sys.stderr.write("\nFinished processing " + str(len(files)) + fileword)
+
+if __name__ == "__main__":
+	run_hebpipe()
