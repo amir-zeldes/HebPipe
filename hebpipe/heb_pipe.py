@@ -7,12 +7,21 @@ import subprocess
 from glob import glob
 
 from rftokenizer import RFTokenizer
-from lib.xrenner import Xrenner
-from lib._version import __version__
-from lib.tt2conll import conllize
-from lib.append_column import inject_col
-from lib.sent_split import toks_to_sents
-from lib.whitespace_tokenize import tokenize as whitespace_tokenize
+try:  # Module usage
+	from .lib.xrenner import Xrenner
+	from .lib._version import __version__
+	from .lib.tt2conll import conllize
+	from .lib.append_column import inject_col
+	from .lib.sent_split import toks_to_sents
+	from .lib.whitespace_tokenize import tokenize as whitespace_tokenize
+except ImportError:  # direct script usage
+	from lib.xrenner import Xrenner
+	from lib._version import __version__
+	from lib.tt2conll import conllize
+	from lib.append_column import inject_col
+	from lib.sent_split import toks_to_sents
+	from lib.whitespace_tokenize import tokenize as whitespace_tokenize
+
 
 PY3 = sys.version_info[0] > 2
 
@@ -617,7 +626,10 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 	dotok = opts.tokenize
 
 	if not opts.quiet:
-		from lib import timing
+		try:
+			from .lib import timing
+		except ImportError:  # direct script usage
+			from lib import timing
 
 	files = glob(opts.files)
 
