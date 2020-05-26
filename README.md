@@ -36,8 +36,16 @@ Zeldes, Amir (2018) A Characterwise Windowed Approach to Hebrew Morphological Se
 
 ## Installation
 
+Either install from PyPI using pip:
+
+`pip install hebpipe`
+
+Or install manually: 
+
   * Clone this repository into the directory that the script should run in (git clone https://github.com/amir-zeldes/HebPipe)
   * In that directory, install the dependencies under **Requirements**, e.g. by running `python setup.py install` or `pip install -r requirements.txt`
+  
+Installing should get all Python dependencies, but **you will need 64 bit Java** installed and available on your path (see details below). Models can be downloaded automatically by the script on its first run.
   
 ## Requirements
 
