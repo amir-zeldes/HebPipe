@@ -1,6 +1,6 @@
 import atexit
 import sys
-from time import process_time
+from time import time
 from functools import reduce
 
 def secondsToStr(t):
@@ -8,23 +8,22 @@ def secondsToStr(t):
         reduce(lambda ll,b : divmod(ll[0],b) + ll[1:],
             [(t*1000,),1000,60,60])
 
-line = "="*40
 def log(s, elapsed=None):
-    #print line
-    #print secondsToStr(process_time()), '-', s
+    line = "="*40
     if elapsed:
         sys.stderr.write("Elapsed time: " + str(elapsed) + "\n")
     sys.stderr.write(line +"\n")
 
 def endlog():
-    end = process_time()
+    end = time()
+    print(start,end)
     elapsed = end-start
     log("End Program", secondsToStr(elapsed))
 
 def now():
-    return secondsToStr(process_time())
+    return secondsToStr(time())
 
-start = time.time()
+start = time()
 
 atexit.register(endlog)
 #log("Start Program")
