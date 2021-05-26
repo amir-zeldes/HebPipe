@@ -38,12 +38,12 @@
 """
 
 from argparse import ArgumentParser
-import io, sys
+import io, sys, re
 
 PY3 = sys.version_info[0] == 3
 
 
-def conllize(in_text,tag=None,element=None,no_zero=False, super_mapping=None, ten_cols=False):
+def conllize(in_text,tag=None,element=None,no_zero=False, super_mapping=None, ten_cols=False, attrs_as_comments=False):
 
 	if not PY3:
 		if not isinstance(in_text,unicode):
@@ -87,6 +87,10 @@ def conllize(in_text,tag=None,element=None,no_zero=False, super_mapping=None, te
 						outlines.append("\t".join([str(counter), tok, lemma, pos, pos, morph, "0", "_", "_", misc]))
 				counter += 1
 			if xml:
+				if "<" + element + " " in line and attrs_as_comments:
+					attrs = re.findall(r' ([^ ="]+)="([^"]+)"',line)
+					for key, val in attrs:
+						outlines.append("# " + key + " = " + val.strip())
 				if "</" + element + ">" in line:
 					counter = 1
 					outlines.append("")
