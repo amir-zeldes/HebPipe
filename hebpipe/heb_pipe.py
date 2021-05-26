@@ -9,27 +9,28 @@ from diaparser.parsers import Parser
 
 from rftokenizer import RFTokenizer
 try:  # Module usage
-	from .lib.xrenner import Xrenner
-	from .lib._version import __version__
-	from .lib.tt2conll import conllize
-	from .lib.append_column import inject_col
-	from .lib.sent_split import toks_to_sents
-	from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
+    from .lib.xrenner import Xrenner
+    from .lib._version import __version__
+    from .lib.tt2conll import conllize
+    from .lib.append_column import inject_col
+    from .lib.sent_split import toks_to_sents
+    from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
+    from .lib.flair_sent_splitter import FlairSentSplitter
 except ImportError:  # direct script usage
-	from lib.xrenner import Xrenner
-	from lib._version import __version__
-	from lib.tt2conll import conllize
-	from lib.append_column import inject_col
-	from lib.sent_split import toks_to_sents
-	from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
-
+    from lib.xrenner import Xrenner
+    from lib._version import __version__
+    from lib.tt2conll import conllize
+    from lib.append_column import inject_col
+    from lib.sent_split import toks_to_sents
+    from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
+    from lib.flair_sent_splitter import FlairSentSplitter
 
 PY3 = sys.version_info[0] > 2
 
 if PY3:
-	from urllib.request import urlretrieve
+    from urllib.request import urlretrieve
 else:
-	from urllib import urlretrieve
+    from urllib import urlretrieve
 
 inp = input if PY3 else raw_input
 
@@ -38,182 +39,184 @@ lib_dir = script_dir + os.sep + "lib" + os.sep
 bin_dir = script_dir + os.sep + "bin" + os.sep
 data_dir = script_dir + os.sep + "data" + os.sep
 model_dir = script_dir + os.sep + "models" + os.sep
-parser_path = bin_dir + "maltparser-1.9.1" + os.sep
 marmot_path = bin_dir + "Marmot" + os.sep
 
 
 def log_tasks(opts):
-	sys.stderr.write("\nRunning tasks:\n" +"="*20 + "\n")
-	if opts.sent not in ["auto","none"]:
-		sys.stderr.write("o Splitting sentences based on tag: "+opts.sent+"\n")
-	elif opts.sent == "auto":
-		sys.stderr.write("o Automatic sentence splitting\n")
-	if opts.whitespace:
-		sys.stderr.write("o Whitespace tokenization\n")
-	if opts.tokenize:
-		sys.stderr.write("o Morphological segmentation\n")
-	if opts.pos:
-		sys.stderr.write("o POS tagging\n")
-	if opts.lemma:
-		sys.stderr.write("o Lemmatization\n")
-	if opts.morph:
-		sys.stderr.write("o Morphological analysis\n")
-	if opts.dependencies:
-		sys.stderr.write("o Dependency parsing\n")
-	if opts.entities:
-		sys.stderr.write("o Entity recognition\n")
-	if opts.coref:
-		sys.stderr.write("o Coreference resolution\n")
+    sys.stderr.write("\nRunning tasks:\n" +"="*20 + "\n")
+    if opts.sent not in ["auto","none"]:
+        sys.stderr.write("o Splitting sentences based on tag: "+opts.sent+"\n")
+    elif opts.sent == "auto":
+        if opts.punct_sentencer:
+            sys.stderr.write("o Automatic sentence splitting (punctuation based)\n")
+        else:
+            sys.stderr.write("o Automatic sentence splitting (neural)\n")
+    if opts.whitespace:
+        sys.stderr.write("o Whitespace tokenization\n")
+    if opts.tokenize:
+        sys.stderr.write("o Morphological segmentation\n")
+    if opts.pos:
+        sys.stderr.write("o POS tagging\n")
+    if opts.lemma:
+        sys.stderr.write("o Lemmatization\n")
+    if opts.morph:
+        sys.stderr.write("o Morphological analysis\n")
+    if opts.dependencies:
+        sys.stderr.write("o Dependency parsing\n")
+    if opts.entities:
+        sys.stderr.write("o Entity recognition\n")
+    if opts.coref:
+        sys.stderr.write("o Coreference resolution\n")
 
-	sys.stderr.write("\n")
+    sys.stderr.write("\n")
 
 
 def diagnose_opts(opts):
 
-	if not opts.pos and not opts.morph and not opts.whitespace and not opts.tokenize and not opts.lemma \
-		and not opts.dependencies and not opts.entities and not opts.coref:
-		if not opts.quiet:
-			sys.stderr.write("! You selected no processing options\n")
-			sys.stderr.write("! Assuming you want all processing steps\n")
-		opts.whitespace = True
-		opts.tokenize = True
-		opts.pos = True
-		opts.morph = True
-		opts.lemma = True
-		opts.dependencies = True
-		opts.entities = True
-		opts.coref = True
+    if not opts.pos and not opts.morph and not opts.whitespace and not opts.tokenize and not opts.lemma \
+        and not opts.dependencies and not opts.entities and not opts.coref:
+        if not opts.quiet:
+            sys.stderr.write("! You selected no processing options\n")
+            sys.stderr.write("! Assuming you want all processing steps\n")
+        opts.whitespace = True
+        opts.tokenize = True
+        opts.pos = True
+        opts.morph = True
+        opts.lemma = True
+        opts.dependencies = True
+        opts.entities = True
+        opts.coref = True
 
-	added = []
-	trigger = ""
-	if opts.dependencies:
-		trigger = "depenedencies"
-		if not opts.pos:
-			added.append("pos")
-			opts.pos = True
-		if not opts.lemma:
-			added.append("lemma")
-			opts.lemma = True
-		if not opts.morph:
-			added.append("morph")
-			opts.morph = True
-	if len(added)>0:
-		sys.stderr.write("! You selected "+trigger+"\n")
-		sys.stderr.write("! Turning on options: "+",".join(added) +"\n")
+    added = []
+    trigger = ""
+    if opts.dependencies:
+        trigger = "depenedencies"
+        if not opts.pos:
+            added.append("pos")
+            opts.pos = True
+        if not opts.lemma:
+            added.append("lemma")
+            opts.lemma = True
+        if not opts.morph:
+            added.append("morph")
+            opts.morph = True
+    if len(added)>0:
+        sys.stderr.write("! You selected "+trigger+"\n")
+        sys.stderr.write("! Turning on options: "+",".join(added) +"\n")
 
-	added = []
-	if opts.whitespace:
-		trigger = "whitespace tokenization"
-		if not opts.tokenize:
-			added.append("tokenize")
-			opts.tokenize = True
-	if len(added)>0:
-		sys.stderr.write("! You selected "+trigger+"\n")
-		sys.stderr.write("! Turning on options: "+",".join(added) +"\n")
-	return opts
+    added = []
+    if opts.whitespace:
+        trigger = "whitespace tokenization"
+        if not opts.tokenize:
+            added.append("tokenize")
+            opts.tokenize = True
+    if len(added)>0:
+        sys.stderr.write("! You selected "+trigger+"\n")
+        sys.stderr.write("! Turning on options: "+",".join(added) +"\n")
+    return opts
 
 
 def groupify(output,anno):
-	groups = ""
-	current_group = ""
-	for line in output.split("\n"):
-		if " "+anno+"=" in line:
-			current_group += re.search(anno + r'="([^"]*)"',line).group(1)
-		if line.startswith("</") and "_group" in line:
-			groups += current_group +"\n"
-			current_group = ""
+    groups = ""
+    current_group = ""
+    for line in output.split("\n"):
+        if " "+anno+"=" in line:
+            current_group += re.search(anno + r'="([^"]*)"',line).group(1)
+        if line.startswith("</") and "_group" in line:
+            groups += current_group +"\n"
+            current_group = ""
 
-	return groups
+    return groups
 
 
 def get_bound_group_map(data):
 
-	mapping = {}
-	data = data.split("\n")
-	# Ignore markup
-	data = [u for u in data if not (u.startswith("<") and u.endswith(">"))]
-	counter = 0
-	for i, line in enumerate(data):
-		super_token = line.replace("|","") if line != "|" else "|"
-		segs = line.split("|") if line != "|" else ["|"]
-		for j, seg in enumerate(segs):
-			if len(segs)>1 and j == 0:
-				mapping[counter] = (super_token,len(segs))
-				super_token = ""
-			counter += 1
+    mapping = {}
+    data = data.split("\n")
+    # Ignore markup
+    data = [u for u in data if not (u.startswith("<") and u.endswith(">"))]
+    counter = 0
+    for i, line in enumerate(data):
+        super_token = line.replace("|","") if line != "|" else "|"
+        segs = line.split("|") if line != "|" else ["|"]
+        for j, seg in enumerate(segs):
+            if len(segs)>1 and j == 0:
+                mapping[counter] = (super_token,len(segs))
+                super_token = ""
+            counter += 1
 
-	return mapping
+    return mapping
 
 
 def remove_nesting_attr(data, nester, nested, attr="xml:lang"):
-	"""
-	Removes attribute on nesting element if a nested element includes it
+    """
+    Removes attribute on nesting element if a nested element includes it
 
-	:param data: SGML input
-	:param nester: nesting tag, e.g. "norm"
-	:param nested: nested tag, e.g. "morph"
-	:param attr: attribute, e.g. "lang"
-	:return: cleaned SGML
-	"""
+    :param data: SGML input
+    :param nester: nesting tag, e.g. "norm"
+    :param nested: nested tag, e.g. "morph"
+    :param attr: attribute, e.g. "lang"
+    :return: cleaned SGML
+    """
 
-	if attr not in data:
-		return data
-	flagged = []
-	in_attr_nester = False
-	last_nester = -1
-	lines = data.split("\n")
-	for i, line in enumerate(lines):
-		if nester + "=" in line and attr+"=" in line:
-			in_attr_nester = True
-			last_nester = i
-		if "</" + nester + ">" in line:
-			in_attr_nester = False
-		if nested in line and attr+"=" in line and in_attr_nester and last_nester > -1:
-			flagged.append(last_nester)
-			in_attr_nester = False
-	for i in flagged:
-		lines[i] = re.sub(' '+attr+'="[^"]+"','',lines[i])
-	return "\n".join(lines)
+    if attr not in data:
+        return data
+    flagged = []
+    in_attr_nester = False
+    last_nester = -1
+    lines = data.split("\n")
+    for i, line in enumerate(lines):
+        if nester + "=" in line and attr+"=" in line:
+            in_attr_nester = True
+            last_nester = i
+        if "</" + nester + ">" in line:
+            in_attr_nester = False
+        if nested in line and attr+"=" in line and in_attr_nester and last_nester > -1:
+            flagged.append(last_nester)
+            in_attr_nester = False
+    for i in flagged:
+        lines[i] = re.sub(' '+attr+'="[^"]+"','',lines[i])
+    return "\n".join(lines)
 
 
 def tok_from_norm(data):
-	"""
-	Takes TT-SGML, extracts norm attribute, and replaces existing tokens with norm values while retaining SGML tags.
-	Used to feed parser norms while retaining SGML sentence separators.
+    """
+    Takes TT-SGML, extracts norm attribute, and replaces existing tokens with norm values while retaining SGML tags.
+    Used to feed parser norms while retaining SGML sentence separators.
 
-	:param data: TTSGML with <norm norm=...> and raw tokens to replace
-	:return: TTSGML with tags preserved and tokens replace by norm attribute values
-	"""
+    :param data: TTSGML with <norm norm=...> and raw tokens to replace
+    :return: TTSGML with tags preserved and tokens replace by norm attribute values
+    """
 
-	outdata = []
-	norm = ""
-	for line in data.replace("\r","").split("\n"):
-		if line.startswith("<"):
-			m = re.search(r'norm="([^"]*)"',line)
-			if m is not None:
-				norm = m.group(1)
-			outdata.append(line)
-		else:
-			if norm != "":
-				outdata.append(norm)
-				norm=""
-	return "\n".join(outdata) + "\n"
+    outdata = []
+    norm = ""
+    for line in data.replace("\r","").split("\n"):
+        if line.startswith("<"):
+            m = re.search(r'norm="([^"]*)"',line)
+            if m is not None:
+                norm = m.group(1)
+            outdata.append(line)
+        else:
+            if norm != "":
+                outdata.append(norm)
+                norm=""
+    return "\n".join(outdata) + "\n"
 
 
 def read_attributes(input,attribute_name):
-	out_stream =""
-	for line in input.split('\n'):
-		if attribute_name + '="' in line:
-			m = re.search(attribute_name+r'="([^"]*)"',line)
-			if m is None:
-				print("ERR: cant find " + attribute_name + " in line: " + line)
-				attribute_value = ""
-			else:
-				attribute_value = m.group(1)
-			if len(attribute_value)==0:
-				attribute_value = "_warn:empty_"+attribute_name+"_"
-			out_stream += attribute_value +"\n"
-	return out_stream
+    out_stream =""
+    for line in input.split('\n'):
+        if attribute_name + '="' in line:
+            m = re.search(attribute_name+r'="([^"]*)"',line)
+            if m is None:
+                print("ERR: cant find " + attribute_name + " in line: " + line)
+                attribute_value = ""
+            else:
+                attribute_value = m.group(1)
+            if len(attribute_value)==0:
+                attribute_value = "_warn:empty_"+attribute_name+"_"
+            out_stream += attribute_value +"\n"
+    return out_stream
 
 
 def merge_into_tag(tag_to_kill, tag_to_merge_into,stream):
@@ -259,131 +262,131 @@ def inject_conllu(source_conllu, target_conllu, columns=None):
 
 
 def get_col(data, colnum):
-	if not isinstance(data,list):
-		data = data.split("\n")
+    if not isinstance(data,list):
+        data = data.split("\n")
 
-	splits = [row.split("\t") for row in data if "\t" in row]
-	return [r[colnum] for r in splits]
+    splits = [row.split("\t") for row in data if "\t" in row]
+    return [r[colnum] for r in splits]
 
 
 def exec_via_temp(input_text, command_params, workdir="", outfile=False):
-	temp = tempfile.NamedTemporaryFile(delete=False)
-	if outfile:
-		temp2 = tempfile.NamedTemporaryFile(delete=False)
-	output = ""
-	try:
-		temp.write(input_text.encode("utf8"))
-		temp.close()
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    if outfile:
+        temp2 = tempfile.NamedTemporaryFile(delete=False)
+    output = ""
+    try:
+        temp.write(input_text.encode("utf8"))
+        temp.close()
 
-		if outfile:
-			command_params = [x if 'tempfilename2' not in x else x.replace("tempfilename2",temp2.name) for x in command_params]
-		command_params = [x if 'tempfilename' not in x else x.replace("tempfilename",temp.name) for x in command_params]
-		if workdir == "":
-			proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE)
-			(stdout, stderr) = proc.communicate()
-		else:
-			proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE,cwd=workdir)
-			(stdout, stderr) = proc.communicate()
-		if outfile:
-			if PY3:
-				output = io.open(temp2.name,encoding="utf8").read()
-			else:
-				output = open(temp2.name).read()
-			temp2.close()
-			os.remove(temp2.name)
-		else:
-			output = stdout
-		#print(stderr)
-		proc.terminate()
-	except Exception as e:
-		print(e)
-	finally:
-		os.remove(temp.name)
-		return output
+        if outfile:
+            command_params = [x if 'tempfilename2' not in x else x.replace("tempfilename2",temp2.name) for x in command_params]
+        command_params = [x if 'tempfilename' not in x else x.replace("tempfilename",temp.name) for x in command_params]
+        if workdir == "":
+            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE)
+            (stdout, stderr) = proc.communicate()
+        else:
+            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE,cwd=workdir)
+            (stdout, stderr) = proc.communicate()
+        if outfile:
+            if PY3:
+                output = io.open(temp2.name,encoding="utf8").read()
+            else:
+                output = open(temp2.name).read()
+            temp2.close()
+            os.remove(temp2.name)
+        else:
+            output = stdout
+        #print(stderr)
+        proc.terminate()
+    except Exception as e:
+        print(e)
+    finally:
+        os.remove(temp.name)
+        return output
 
 
 def exec_via_temp_old(input_text, command_params, workdir=""):
-	temp = tempfile.NamedTemporaryFile(delete=False)
-	exec_out = ""
-	try:
-		if PY3:
-			temp.write(input_text.encode("utf8"))
-		else:
-			temp.write(input_text.encode("utf8"))
-		temp.close()
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    exec_out = ""
+    try:
+        if PY3:
+            temp.write(input_text.encode("utf8"))
+        else:
+            temp.write(input_text.encode("utf8"))
+        temp.close()
 
-		command_params = [x if x != 'tempfilename' else temp.name for x in command_params]
-		if workdir == "":
-			proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE)
-			(stdout, stderr) = proc.communicate()
-		else:
-			proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE,cwd=workdir)
-			(stdout, stderr) = proc.communicate()
+        command_params = [x if x != 'tempfilename' else temp.name for x in command_params]
+        if workdir == "":
+            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE)
+            (stdout, stderr) = proc.communicate()
+        else:
+            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE,cwd=workdir)
+            (stdout, stderr) = proc.communicate()
 
-		exec_out = stdout
-	except Exception as e:
-		print(e)
-	finally:
-		os.remove(temp.name)
-		#if PY3:
-		exec_out = exec_out.decode("utf8")
-		return exec_out
+        exec_out = stdout
+    except Exception as e:
+        print(e)
+    finally:
+        os.remove(temp.name)
+        #if PY3:
+        exec_out = exec_out.decode("utf8")
+        return exec_out
 
 
 def get_origs(data):
-	origs = []
-	current = ""
-	for line in data.split("\n"):
-		if "</norm>" in line:
-			origs.append(current)
-			current = ""
-		if not line.startswith("<"):  # Token line
-			current += line
+    origs = []
+    current = ""
+    for line in data.split("\n"):
+        if "</norm>" in line:
+            origs.append(current)
+            current = ""
+        if not line.startswith("<"):  # Token line
+            current += line
 
-	return "\n".join(origs)
+    return "\n".join(origs)
 
 
 def inject(attribute_name, contents, at_attribute,into_stream,replace=True):
-	insertions = contents.split('\n')
-	injected = ""
-	i=0
-	for line in into_stream.split("\n"):
-		if at_attribute + "=" in line:
-			if i >= len(insertions):
-				raise Exception("Error out of bounds at element " + str(i) + " in document beginning " + into_stream[:1000])
-			if len(insertions[i])>0:
-				if at_attribute == attribute_name:  # Replace old value of attribute with new one
-					line = re.sub(attribute_name+'="[^"]+"',attribute_name+'="'+insertions[i]+'"',line)
-				else:  # Place before specific at_attribute
-					if replace or " " + attribute_name + "=" not in line:
-						line = re.sub(at_attribute+"=",attribute_name+'="'+insertions[i]+'" '+at_attribute+"=",line)
-			i += 1
-		injected += line + "\n"
-	return injected
+    insertions = contents.split('\n')
+    injected = ""
+    i=0
+    for line in into_stream.split("\n"):
+        if at_attribute + "=" in line:
+            if i >= len(insertions):
+                raise Exception("Error out of bounds at element " + str(i) + " in document beginning " + into_stream[:1000])
+            if len(insertions[i])>0:
+                if at_attribute == attribute_name:  # Replace old value of attribute with new one
+                    line = re.sub(attribute_name+'="[^"]+"',attribute_name+'="'+insertions[i]+'"',line)
+                else:  # Place before specific at_attribute
+                    if replace or " " + attribute_name + "=" not in line:
+                        line = re.sub(at_attribute+"=",attribute_name+'="'+insertions[i]+'" '+at_attribute+"=",line)
+            i += 1
+        injected += line + "\n"
+    return injected
 
 
 def extract_conll(conll_string):
-	conll_string = conll_string.replace("\r","").strip()
-	sentences = conll_string.split("\n\n")
-	ids = ""
-	funcs = ""
-	parents = ""
-	id_counter = 0
-	offset = 0
-	for sentence in sentences:
-		tokens = sentence.split("\n")
-		for token in tokens:
-			if "\t" in token:
-				id_counter +=1
-				ids += "u"+ str(id_counter) + "\n"
-				cols = token.split("\t")
-				funcs += cols[7].replace("ROOT","root") +"\n"
-				if cols[6] == "0":
-					parents += "#u0\n"
-				else:
-					parents += "#u" + str(int(cols[6])+offset)+"\n"
-		offset = id_counter
-	return ids, funcs, parents
+    conll_string = conll_string.replace("\r","").strip()
+    sentences = conll_string.split("\n\n")
+    ids = ""
+    funcs = ""
+    parents = ""
+    id_counter = 0
+    offset = 0
+    for sentence in sentences:
+        tokens = sentence.split("\n")
+        for token in tokens:
+            if "\t" in token:
+                id_counter +=1
+                ids += "u"+ str(id_counter) + "\n"
+                cols = token.split("\t")
+                funcs += cols[7].replace("ROOT","root") +"\n"
+                if cols[6] == "0":
+                    parents += "#u0\n"
+                else:
+                    parents += "#u" + str(int(cols[6])+offset)+"\n"
+        offset = id_counter
+    return ids, funcs, parents
 
 
 def inject_tags(in_sgml,insertion_specs,around_tag="norm",inserted_tag="mwe"):
@@ -621,19 +624,18 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
 def run_hebpipe():
 
+    if sys.version_info[0] == 2 and sys.version_info[1] < 7:
+        sys.stderr.write("Python versions below 2.7 are not supported.\n")
+        sys.stderr.write("Your Python version:\n")
+        sys.stderr.write(".".join([str(v) for v in sys.version_info[:3]]) + "\n")
+        sys.exit(0)
 
-	if sys.version_info[0] == 2 and sys.version_info[1] < 7:
-		sys.stderr.write("Python versions below 2.7 are not supported.\n")
-		sys.stderr.write("Your Python version:\n")
-		sys.stderr.write(".".join([str(v) for v in sys.version_info[:3]]) + "\n")
-		sys.exit(0)
+    from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
-	from argparse import ArgumentParser, RawDescriptionHelpFormatter
-
-	parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter)
-	parser.prog = "HebPipe - NLP Pipeline for Hebrew"
-	parser.usage = "python heb_pipe.py [OPTIONS] files"
-	parser.epilog = """Example usage:
+    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter)
+    parser.prog = "HebPipe - NLP Pipeline for Hebrew"
+    parser.usage = "python heb_pipe.py [OPTIONS] files"
+    parser.epilog = """Example usage:
 --------------
 Whitespace tokenize, tokenize morphemes, add pos, lemma, morph, dep parse with automatic sentence splitting, 
 entity recognition and coref for one text file, output in default conllu format:
@@ -654,106 +656,106 @@ Add full analyses to a whole directory of *.txt files, output to a specified dir
 Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use existing tag <sent> to recognize sentence borders:
 > python heb_pipe.py -d -s sent example_in.tt
 """
-	parser.add_argument("files", help="File name or pattern of files to process (e.g. *.txt)")
+    parser.add_argument("files", help="File name or pattern of files to process (e.g. *.txt)")
 
-	g1 = parser.add_argument_group("standard module options")
-	g1.add_argument("-w","--whitespace", action="store_true", help='Perform white-space based tokenization of large word forms')
-	g1.add_argument("-t","--tokenize", action="store_true", help='Tokenize large word forms into smaller morphological segments')
-	g1.add_argument("-p","--pos", action="store_true", help='Do POS tagging')
-	g1.add_argument("-l","--lemma", action="store_true", help='Do lemmatization')
-	g1.add_argument("-m","--morph", action="store_true", help='Do morphological tagging')
-	g1.add_argument("-d","--dependencies", action="store_true", help='Parse with dependency parser')
-	g1.add_argument("-e","--entities", action="store_true", help='Add entity spans and types')
-	g1.add_argument("-c","--coref", action="store_true", help='Add coreference annotations')
-	g1.add_argument("-s","--sent", action="store", default="auto", choices=["auto","none"], help='XML tag to split sentences, e.g. sent for <sent ..> or none for no splitting (otherwise automatic sentence splitting)')
-	g1.add_argument("-o","--out", action="store", choices=["pipes","conllu","sgml"], default="conllu", help='Output CoNLL format, SGML or just tokenize with pipes')
+    g1 = parser.add_argument_group("standard module options")
+    g1.add_argument("-w","--whitespace", action="store_true", help='Perform white-space based tokenization of large word forms')
+    g1.add_argument("-t","--tokenize", action="store_true", help='Tokenize large word forms into smaller morphological segments')
+    g1.add_argument("-p","--pos", action="store_true", help='Do POS tagging')
+    g1.add_argument("-l","--lemma", action="store_true", help='Do lemmatization')
+    g1.add_argument("-m","--morph", action="store_true", help='Do morphological tagging')
+    g1.add_argument("-d","--dependencies", action="store_true", help='Parse with dependency parser')
+    g1.add_argument("-e","--entities", action="store_true", help='Add entity spans and types')
+    g1.add_argument("-c","--coref", action="store_true", help='Add coreference annotations')
+    g1.add_argument("-s","--sent", action="store", default="auto", help='XML tag to split sentences, e.g. sent for <sent ..> or none for no splitting (otherwise automatic sentence splitting)')
+    g1.add_argument("-o","--out", action="store", choices=["pipes","conllu","sgml"], default="conllu", help='Output CoNLL format, SGML or just tokenize with pipes')
 
-	g2 = parser.add_argument_group("less common options")
-	g2.add_argument("-q","--quiet", action="store_true", help='Suppress verbose messages')
-	g2.add_argument("-x","--extension", action="store", default='conllu', help='Extension for output files (default: .conllu)')
-	g2.add_argument("--dirout", action="store", default=".", help='Optional output directory (default: this dir)')
-	g2.add_argument("--version", action="store_true", help='Print version number and quit')
+    g2 = parser.add_argument_group("less common options")
+    g2.add_argument("-q","--quiet", action="store_true", help='Suppress verbose messages')
+    g2.add_argument("-x","--extension", action="store", default='conllu', help='Extension for output files (default: .conllu)')
+    g2.add_argument("--dirout", action="store", default=".", help='Optional output directory (default: this dir)')
+    g2.add_argument("--punct_sentencer", action="store_true", help='Only use punctuation (.?!) to split sentences (deprecated)')
+    g2.add_argument("--version", action="store_true", help='Print version number and quit')
 
-	if "--version" in sys.argv:
-		sys.stdout.write("HebPipe V" + __version__)
-		sys.exit(1)
+    if "--version" in sys.argv:
+        sys.stdout.write("HebPipe V" + __version__)
+        sys.exit(1)
 
-	opts = parser.parse_args()
-	opts = diagnose_opts(opts)
-	dotok = opts.tokenize
+    opts = parser.parse_args()
+    opts = diagnose_opts(opts)
+    dotok = opts.tokenize
 
-	if not opts.quiet:
-		try:
-			from .lib import timing
-		except ImportError:  # direct script usage
-			from lib import timing
+    if not opts.quiet:
+        try:
+            from .lib import timing
+        except ImportError:  # direct script usage
+            from lib import timing
 
-	files = glob(opts.files)
+    files = glob(opts.files)
 
-	if not opts.quiet:
-		log_tasks(opts)
+    if not opts.quiet:
+        log_tasks(opts)
 
-	# Check if models, Marmot and Malt Parser are available
-	if opts.pos or opts.lemma or opts.morph or opts.dependencies or opts.tokenize or opts.entities:
-		marmot_OK, malt_OK, models_OK = check_requirements()
-		if ((opts.pos or opts.lemma or opts.morph) and not marmot_OK) or (opts.dependencies and not malt_OK) or not models_OK:
-			sys.stderr.write("! You are missing required software:\n")
-			if (opts.pos or opts.lemma or opts.morph) and not marmot_OK:
-				sys.stderr.write(" - Tagging, lemmatization and morphological analysis require Marmot\n")
-			if opts.dependencies and not malt_OK:
-				sys.stderr.write(" - Parsing is specified but Malt Parser 1.9.1 is not installed\n")
-			if not models_OK:
-				sys.stderr.write(" - Model files in models/ are missing\n")
-			response = inp("Attempt to download missing files? [Y/N]\n")
-			if response.upper().strip() == "Y":
-				download_requirements(marmot_OK,malt_OK,models_OK)
-			else:
-				sys.stderr.write("Aborting\n")
-				sys.exit(0)
+    # Check if models, Marmot and Malt Parser are available
+    if opts.pos or opts.lemma or opts.morph or opts.dependencies or opts.tokenize or opts.entities:
+        marmot_OK, models_OK = check_requirements()
+        if ((opts.pos or opts.lemma or opts.morph) and not marmot_OK) or not models_OK:
+            sys.stderr.write("! You are missing required software:\n")
+            if (opts.pos or opts.lemma or opts.morph) and not marmot_OK:
+                sys.stderr.write(" - Tagging, lemmatization and morphological analysis require Marmot\n")
+            if not models_OK:
+                sys.stderr.write(" - Model files in models/ are missing\n")
+            response = inp("Attempt to download missing files? [Y/N]\n")
+            if response.upper().strip() == "Y":
+                download_requirements(marmot_OK,models_OK)
+            else:
+                sys.stderr.write("Aborting\n")
+                sys.exit(0)
 
-	if dotok:  # Pre-load stacked tokenizer for entire batch
-		rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
-	else:
-		rf_tok = None
-	if opts.entities:  # Pre-load stacked tokenizer for entire batch
-		xrenner = Xrenner(model=model_dir + "heb.xrm")
-	else:
-		xrenner = None
+    if dotok:  # Pre-load stacked tokenizer for entire batch
+        rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
+    else:
+        rf_tok = None
+    if opts.entities:  # Pre-load stacked tokenizer for entire batch
+        xrenner = Xrenner(model=model_dir + "heb.xrm")
+    else:
+        xrenner = None
     flair_sent_splitter = FlairSentSplitter() if opts.sent == "auto" and not opts.punct_sentencer else None
     dep_parser = Parser.load(model_dir+"heb.diaparser") if opts.dependencies else None
 
-	for infile in files:
-		base = os.path.basename(infile)
-		if infile.endswith("." + opts.extension):
-			outfile = base.replace("." + opts.extension,".out." + opts.extension)
-		elif len(infile) > 4 and infile[-4] == ".":
-			outfile = base[:-4] + "." + opts.extension
-		else:
-			outfile = base + "." + opts.extension
+    for infile in files:
+        base = os.path.basename(infile)
+        if infile.endswith("." + opts.extension):
+            outfile = base.replace("." + opts.extension,".out." + opts.extension)
+        elif len(infile) > 4 and infile[-4] == ".":
+            outfile = base[:-4] + "." + opts.extension
+        else:
+            outfile = base + "." + opts.extension
 
-		if not opts.quiet:
-			sys.stderr.write("Processing " + base + "\n")
+        if not opts.quiet:
+            sys.stderr.write("Processing " + base + "\n")
 
-		input_text = io.open(infile,encoding="utf8").read()
+        input_text = io.open(infile,encoding="utf8").read()
 
 
-		processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.pos, do_lemma=opts.lemma,
-							   do_parse=opts.dependencies, out_mode=opts.out,
-							   sent_tag=opts.sent, preloaded=(rf_tok,xrenner))
+        processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.pos, do_lemma=opts.lemma,
+                               do_parse=opts.dependencies, do_entity=opts.entities, out_mode=opts.out,
+                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,flair_sent_splitter,dep_parser),
+                                punct_sentencer=opts.punct_sentencer)
 
-		if len(files) > 1:
-			with io.open(opts.dirout + os.sep + outfile, 'w', encoding="utf8", newline="\n") as f:
-				if not PY3:
-					processed = unicode(processed)
-				f.write((processed.strip() + "\n"))
-		else:  # Single file, print to stdout
-			if PY3:
-				sys.stdout.buffer.write(processed.encode("utf8"))
-			else:
-				print(processed.encode("utf8"))
+        if len(files) > 1:
+            with io.open(opts.dirout + os.sep + outfile, 'w', encoding="utf8", newline="\n") as f:
+                if not PY3:
+                    processed = unicode(processed)
+                f.write((processed.strip() + "\n"))
+        else:  # Single file, print to stdout
+            if PY3:
+                sys.stdout.buffer.write(processed.encode("utf8"))
+            else:
+                print(processed.encode("utf8"))
 
-	fileword = " files\n\n" if len(files) > 1 else " file\n\n"
-	sys.stderr.write("\nFinished processing " + str(len(files)) + fileword)
+    fileword = " files\n\n" if len(files) > 1 else " file\n\n"
+    sys.stderr.write("\nFinished processing " + str(len(files)) + fileword)
 
 if __name__ == "__main__":
-	run_hebpipe()
+    run_hebpipe()
