@@ -17,7 +17,7 @@ def postprocess_coref(markables, lex, markstart, markend, markbyhead, conll_toke
 	# Collect markable groups
 	marks_by_group = defaultdict(list)
 	for markable in markables:
-		if markable.antecedent is not "none":
+		if markable.antecedent != "none":
 			if markable.group != markable.antecedent.group:
 				markable.group = markable.antecedent.group
 		marks_by_group[markable.group].append(markable)
@@ -96,7 +96,7 @@ def postprocess_coref(markables, lex, markstart, markend, markbyhead, conll_toke
 					singleton.id = "0"
 			else:
 				for singleton_candidate in marks_by_group[group]:
-					if singleton_candidate.antecedent is not 'none':
+					if singleton_candidate.antecedent != 'none':
 						wipe_group = False
 						break
 				if wipe_group:
