@@ -13,14 +13,14 @@ try:  # Module usage
 	from .lib.tt2conll import conllize
 	from .lib.append_column import inject_col
 	from .lib.sent_split import toks_to_sents
-	from .lib.whitespace_tokenize import tokenize as whitespace_tokenize
+	from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
 except ImportError:  # direct script usage
 	from lib.xrenner import Xrenner
 	from lib._version import __version__
 	from lib.tt2conll import conllize
 	from lib.append_column import inject_col
 	from lib.sent_split import toks_to_sents
-	from lib.whitespace_tokenize import tokenize as whitespace_tokenize
+	from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
 
 
 PY3 = sys.version_info[0] > 2
@@ -463,103 +463,117 @@ def download_requirements(marmot_ok=True, malt_ok=True, models_ok=True):
 
 
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
-		out_mode="conllu", sent_tag=None, preloaded=None):
+        out_mode="conllu", sent_tag=None, preloaded=None, punct_sentencer=False):
 
-	data = input_data.replace("\t","")
-	data = data.replace("\r","")
+    data = input_data.replace("\t","")
+    data = data.replace("\r","")
 
-	if preloaded is not None:
-		rf_tok, xrenner = preloaded
-	else:
-		rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
-		xrenner = Xrenner(model=model_dir + "heb.xrm")
+    if preloaded is not None:
+        rf_tok, xrenner, flair_sent_splitter, parser = preloaded
+    else:
+        rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
+        xrenner = Xrenner(model=model_dir + "heb.xrm")
+        if sent_tag == "auto" and not punct_sentencer:
+            flair_sent_splitter = FlairSentSplitter(model_path=model_dir + "heb.sent")
+        else:
+            flair_sent_splitter = None
+        parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser")
 
-	if do_whitespace:
-		data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto")
+    if do_whitespace:
+        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto")
 
-	if do_tok:
-		tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
-		tokenized = "\n".join(tokenized)
-	else:
-		# Assume data is already one token per line
-		tokenized = data
+    if do_tok:
+        tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
+        tokenized = "\n".join(tokenized)
+    else:
+        # Assume data is already one token per line
+        tokenized = data
 
-	bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
+    bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
 
-	if sent_tag == "auto":
-		tokenized = toks_to_sents(tokenized)
-		sent_tag = "s"
+    if sent_tag == "auto":
+        sent_tag = "s"
+        if punct_sentencer:
+            tokenized = toks_to_sents(tokenized)
+        else:
+            tokenized = flair_sent_splitter.split(tokenized)
 
-	if out_mode == "pipes":
-		return tokenized
-	else:
-		tokenized = tokenized.split("\n")
-		retokenized = []
-		for line in tokenized:
-			if line == "|":
-				retokenized.append(line)
-			else:
-				retokenized.append("\n".join(line.split("|")))
-		tokenized = "\n".join(retokenized)
+    if out_mode == "pipes":
+        return tokenized
+    else:
+        tokenized = tokenized.split("\n")
+        retokenized = []
+        for line in tokenized:
+            if line == "|":
+                retokenized.append(line)
+            else:
+                retokenized.append("\n".join(line.split("|")))
+        tokenized = "\n".join(retokenized)
 
-	if do_tag:
-		if platform.system() == "Windows":
-			tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
-		else:
-			tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar:trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
-		no_sent = re.sub(r'</?s>\n?','',tokenized).strip()
-		morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
-		morphed = morphed.strip().split("\n")
-		morphs = get_col(morphed,7)
-		lemmas = get_col(morphed,3)
+    if do_tag:
+        if platform.system() == "Windows":
+            tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+        else:
+            tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar:trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+        no_sent = re.sub(r'</?s( [^<>]+)?>\n?','',tokenized).strip()
+        morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
+        morphed = morphed.strip().split("\n")
+        morphs = get_col(morphed,7)
+        lemmas = get_col(morphed,3)
 
-		tagged = inject_col(morphed,tokenized,5)
-		if do_lemma:
-			lemmatized = inject_col(lemmas,tagged,-1)
-		else:
-			lemmatized = tagged
-		morphed = inject_col(morphs,lemmatized,-1)
+        tagged = inject_col(morphed,tokenized,5)
+        if do_lemma:
+            lemmatized = inject_col(lemmas,tagged,-1)
+        else:
+            lemmatized = tagged
+        morphed = inject_col(morphs,lemmatized,-1)
 
-		if not do_parse:
-			if out_mode == "conllu":
-				conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map)
-				return conllized
-			else:
-				if not PY3:
-					morphed = morphed.decode("utf8")
-				return morphed
+        if not do_parse:
+            if out_mode == "conllu":
+                conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                     attrs_as_comments=True)
+                conllized = add_space_after(input_data,conllized)
+                return conllized
+            else:
+                if not PY3:
+                    morphed = morphed.decode("utf8")
+                return morphed
 
-	else:
-		if out_mode == "conllu":
-			conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map)
-			return conllized
-		else:
-			return tokenized
+    else:
+        if out_mode == "conllu":
+            conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                 attrs_as_comments=True)
+            conllized = add_space_after(input_data, conllized)
+            return conllized
+        else:
+            return tokenized
 
-	if do_parse:
-		conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map)
-		parse = ['java','-mx1g','-jar',"maltparser-1.9.1.jar",'-c','heb','-i','tempfilename','-m','parse']
-		parsed = exec_via_temp(conllized,parse,parser_path)
+    if do_parse:
+        conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                             attrs_as_comments=True, ten_cols=True)
+        parsed = diaparse(parser, conllized)
 
-		if do_entity:
-			xrenner.docname = "_"
-			if PY3:
-				parsed = parsed.decode("utf8")
-			ents = xrenner.analyze(parsed,"conll_sent")
-			ents = get_col(ents, -1)
-			entified = inject_col(ents, parsed, col=-1, into_col=9, skip_supertoks=True)
-			if PY3:
-				return entified
-			else:
-				return entified.decode("utf8")
-		else:
-			return parsed.decode("utf8")
-	else:
-		if out_mode == "conllu":
-			conllized = conllize(tagged, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map)
-			return conllized
-		else:
-			return tagged
+        if do_entity:
+            xrenner.docname = "_"
+            ents = xrenner.analyze(parsed,"conll_sent")
+            ents = get_col(ents, -1)
+            entified = inject_col(ents, parsed, col=-1, into_col=9, skip_supertoks=True)
+            entified = add_space_after(input_data,entified)
+            if PY3:
+                return entified
+            else:
+                return entified.decode("utf8")
+        else:
+            parsed = add_space_after(input_data,parsed)
+            return parsed
+    else:
+        if out_mode == "conllu":
+            conllized = conllize(tagged, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                 attrs_as_comments=True)
+            conllized = add_space_after(input_data, conllized)
+            return conllized
+        else:
+            return tagged
 
 
 def run_hebpipe():
