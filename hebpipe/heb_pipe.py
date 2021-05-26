@@ -5,6 +5,7 @@ import re, sys, io, os, platform
 import tempfile
 import subprocess
 from glob import glob
+from diaparser.parsers import Parser
 
 from rftokenizer import RFTokenizer
 try:  # Module usage
@@ -216,18 +217,45 @@ def read_attributes(input,attribute_name):
 
 
 def merge_into_tag(tag_to_kill, tag_to_merge_into,stream):
-	vals = []
-	cleaned_stream = ""
-	for line in stream.split("\n"):
-		if " "+tag_to_kill + "=" in line:
-			val = re.search(" " + tag_to_kill+'="([^"]*)"',line).group(1)
-			vals.append(val)
-		elif "</" + tag_to_kill + ">" in line:
-			pass
-		else:
-			cleaned_stream += line + "\n"
-	injected = inject(tag_to_kill,"\n".join(vals).strip(),tag_to_merge_into,cleaned_stream)
-	return injected
+    vals = []
+    cleaned_stream = ""
+    for line in stream.split("\n"):
+        if " "+tag_to_kill + "=" in line:
+            val = re.search(" " + tag_to_kill+'="([^"]*)"',line).group(1)
+            vals.append(val)
+        elif "</" + tag_to_kill + ">" in line:
+            pass
+        else:
+            cleaned_stream += line + "\n"
+    injected = inject(tag_to_kill,"\n".join(vals).strip(),tag_to_merge_into,cleaned_stream)
+    return injected
+
+
+def inject_conllu(source_conllu, target_conllu, columns=None):
+    if columns is None:
+        columns = [6,7]
+    lines = source_conllu.split("\n")
+    insertions = []
+    for line in lines:
+        if "\t" in line:
+            fields = line.split("\t")
+            insertion = []
+            for colnum in columns:
+                insertion.append(fields[colnum])
+            insertions.append(insertion)
+    output = []
+    toknum = 0
+    for line in target_conllu.split("\n"):
+        if "\t" in line:
+            fields = line.split("\t")
+            if "-" not in fields[0]:
+                insertion = insertions[toknum]
+                for i, val in enumerate(insertion):
+                    fields[columns[i]] = val
+                line = "\t".join(fields)
+                toknum += 1
+        output.append(line)
+    return "\n".join(output)
 
 
 def get_col(data, colnum):
@@ -359,107 +387,122 @@ def extract_conll(conll_string):
 
 
 def inject_tags(in_sgml,insertion_specs,around_tag="norm",inserted_tag="mwe"):
-	"""
+    """
 
-	:param in_sgml: input SGML stream including tags to surround with new tags
-	:param insertion_specs: list of triples (start, end, value)
-	:param around_tag: tag of span to surround by insertion
-	:return: modified SGML stream
-	"""
-	if len(insertion_specs) == 0:
-		return in_sgml
+    :param in_sgml: input SGML stream including tags to surround with new tags
+    :param insertion_specs: list of triples (start, end, value)
+    :param around_tag: tag of span to surround by insertion
+    :return: modified SGML stream
+    """
+    if len(insertion_specs) == 0:
+        return in_sgml
 
-	counter = -1
-	next_insert = insertion_specs[0]
-	outlines = []
-	for line in in_sgml.split("\n"):
-		if line.startswith("<" + around_tag + " "):
-			counter += 1
-			if next_insert[0] == counter:  # beginning of a span
-				outlines.append("<" + inserted_tag + " " + inserted_tag + '="' + next_insert[2] + '">')
-		outlines.append(line)
-		if line.startswith("</" + around_tag + ">"):
-			if next_insert[1] == counter:  # end of a span
-				outlines.append("</" + inserted_tag + ">")
+    counter = -1
+    next_insert = insertion_specs[0]
+    outlines = []
+    for line in in_sgml.split("\n"):
+        if line.startswith("<" + around_tag + " "):
+            counter += 1
+            if next_insert[0] == counter:  # beginning of a span
+                outlines.append("<" + inserted_tag + " " + inserted_tag + '="' + next_insert[2] + '">')
+        outlines.append(line)
+        if line.startswith("</" + around_tag + ">"):
+            if next_insert[1] == counter:  # end of a span
+                outlines.append("</" + inserted_tag + ">")
 
-	return "\n".join(outlines)
+    return "\n".join(outlines)
+
+
+def diaparse(parser, conllu):
+    sents = conllu.strip().split("\n\n")
+    parser_input = []
+
+    for sent in sents:
+        words = [(l.split("\t")[0],l.split("\t")[1]) for l in sent.split("\n") if "\t" in l]
+        words = [w[1] for w in words if "." not in w[0] and "-" not in w[0]]
+        parser_input.append(words)
+
+    dataset = parser.predict(parser_input, prob=True)
+
+    out_parses = []
+    for sent in dataset.sentences:
+        out_parses.append(str(sent).strip())
+
+    merged = inject_conllu("\n\n".join(out_parses) + "\n\n", conllu)
+
+    return merged
 
 
 def check_requirements():
-	marmot_OK = True
-	malt_OK = True
-	models_OK = True
-	marmot = marmot_path + "marmot.jar"
-	if not os.path.exists(marmot):
-		sys.stderr.write("! Marmot not found at ./bin/\n")
-		marmot_OK = False
-	if not os.path.exists(parser_path+"maltparser-1.9.1.jar"):
-		sys.stderr.write("! Malt Parser 1.9.1 not found at ./bin/\n")
-		malt_OK = False
-	model_files = ["heb.sm" + str(sys.version_info[0]), "heb.xrm", "heb.mco", "heb.marmot", "heb.lemming"]
-	for model_file in model_files:
-		if not os.path.exists(model_dir + model_file):
-			sys.stderr.write("! Model file " + model_file + " missing in ./models/\n")
-			models_OK = False
+    marmot_OK = True
+    models_OK = True
+    marmot = marmot_path + "marmot.jar"
+    if not os.path.exists(marmot):
+        sys.stderr.write("! Marmot not found at ./bin/\n")
+        marmot_OK = False
+    model_files = ["heb.sm" + str(sys.version_info[0]), "heb.xrm", "heb.marmot", "heb.lemming",
+                   "heb.sent","heb.diaparser"]
+    for model_file in model_files:
+        if not os.path.exists(model_dir + model_file):
+            sys.stderr.write("! Model file " + model_file + " missing in ./models/\n")
+            models_OK = False
 
-	return marmot_OK, malt_OK, models_OK
+    return marmot_OK, models_OK
 
 
-def download_requirements(marmot_ok=True, malt_ok=True, models_ok=True):
-	import requests, zipfile, shutil, tarfile
-	if not PY3:
-		import StringIO
-	urls = []
-	if not malt_ok:
-		urls.append("http://maltparser.org/dist/maltparser-1.9.1.tar.gz")
-	if not marmot_ok:
-		if not os.path.exists(bin_dir + "Marmot"):
-			os.makedirs(bin_dir + "Marmot")
-		marmot_base_url = "http://cistern.cis.lmu.de/marmot/bin/CURRENT/"
-		marmot_current = requests.get(marmot_base_url).text
-		files = re.findall(r'href="((?:marmot|trove)[^"]+jar)"',marmot_current)
-		marmot_file = ""
-		trove_file = ""
-		for f in files:
-			if f.startswith("marmot"):
-				marmot_file = f
-			elif f.startswith("trove"):
-				trove_file = f
-		urls.append(marmot_base_url + marmot_file)
-		urls.append(marmot_base_url + trove_file)
-	if not models_ok:
-		models_base = "http://corpling.uis.georgetown.edu/amir/download/heb_models/"
-		urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
-		urls.append(models_base + "heb.mco")
-		urls.append(models_base + "heb.xrm")
-		urls.append(models_base + "heb.lemming")
-		urls.append(models_base + "heb.marmot")
-	for u in urls:
-		sys.stderr.write("o Downloading from " + str(u) + "\n")
-		if "corpling" in u:
-			base_name = u[u.rfind("/") + 1:]
-			urlretrieve(u,model_dir + base_name)
-		else:
-			r = requests.get(u, stream=True)
-			if PY3:
-				file_contents = io.BytesIO(r.content)
-			else:
-				file_contents = StringIO.StringIO(r.content)
-			if u.endswith("gz"):
-				z = tarfile.open(fileobj=file_contents, mode="r:gz")
-				z.extractall(path=bin_dir)
-			elif u.endswith("jar"):
-				if "trove" in u:
-					with open(bin_dir + "Marmot" + os.sep + "trove.jar", 'wb') as f:
-						f.write(r.content)
-				elif "marmot" in u:
-					with open(bin_dir + "Marmot" + os.sep + "marmot.jar", 'wb') as f:
-						f.write(r.content)
-	sys.stderr.write("\n")
-	# Copy java dependency model files to tool working dirs
-	shutil.copyfile(model_dir+"heb.mco",bin_dir+"maltparser-1.9.1" + os.sep + "heb.mco")
-	shutil.copyfile(model_dir+"heb.marmot",bin_dir+"Marmot" + os.sep + "heb.marmot")
-	shutil.copyfile(model_dir+"heb.lemming",bin_dir+"Marmot" + os.sep + "heb.lemming")
+def download_requirements(marmot_ok=True, models_ok=True):
+    import requests, zipfile, shutil, tarfile
+    if not PY3:
+        import StringIO
+    urls = []
+    if not marmot_ok:
+        if not os.path.exists(bin_dir + "Marmot"):
+            os.makedirs(bin_dir + "Marmot")
+        marmot_base_url = "http://cistern.cis.lmu.de/marmot/bin/CURRENT/"
+        marmot_current = requests.get(marmot_base_url).text
+        files = re.findall(r'href="((?:marmot|trove)[^"]+jar)"',marmot_current)
+        marmot_file = ""
+        trove_file = ""
+        for f in files:
+            if f.startswith("marmot"):
+                marmot_file = f
+            elif f.startswith("trove"):
+                trove_file = f
+        urls.append(marmot_base_url + marmot_file)
+        urls.append(marmot_base_url + trove_file)
+    if not models_ok:
+        models_base = "http://corpling.uis.georgetown.edu/amir/download/heb_models_v2/"
+        urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
+        urls.append(models_base + "heb.diaparser")
+        urls.append(models_base + "heb.sent")
+        urls.append(models_base + "heb.xrm")
+        urls.append(models_base + "heb.lemming")
+        urls.append(models_base + "heb.marmot")
+    for u in urls:
+        sys.stderr.write("o Downloading from " + str(u) + "\n")
+        if "corpling" in u:
+            base_name = u[u.rfind("/") + 1:]
+            urlretrieve(u,model_dir + base_name)
+        else:
+            r = requests.get(u, stream=True)
+            if PY3:
+                file_contents = io.BytesIO(r.content)
+            else:
+                file_contents = StringIO.StringIO(r.content)
+            if u.endswith("gz"):
+                z = tarfile.open(fileobj=file_contents, mode="r:gz")
+                z.extractall(path=bin_dir)
+            elif u.endswith("jar"):
+                if "trove" in u:
+                    with open(bin_dir + "Marmot" + os.sep + "trove.jar", 'wb') as f:
+                        f.write(r.content)
+                elif "marmot" in u:
+                    with open(bin_dir + "Marmot" + os.sep + "marmot.jar", 'wb') as f:
+                        f.write(r.content)
+    sys.stderr.write("\n")
+    # Copy java dependency model files to tool working dirs
+    shutil.copyfile(model_dir+"heb.marmot",bin_dir+"Marmot" + os.sep + "heb.marmot")
+    shutil.copyfile(model_dir+"heb.lemming",bin_dir+"Marmot" + os.sep + "heb.lemming")
 
 
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
@@ -676,6 +719,8 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 		xrenner = Xrenner(model=model_dir + "heb.xrm")
 	else:
 		xrenner = None
+    flair_sent_splitter = FlairSentSplitter() if opts.sent == "auto" and not opts.punct_sentencer else None
+    dep_parser = Parser.load(model_dir+"heb.diaparser") if opts.dependencies else None
 
 	for infile in files:
 		base = os.path.basename(infile)
