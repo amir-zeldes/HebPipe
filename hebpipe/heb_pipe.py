@@ -6,6 +6,7 @@ import tempfile
 import subprocess
 from glob import glob
 from diaparser.parsers import Parser
+import torch
 
 from rftokenizer import RFTokenizer
 try:  # Module usage
@@ -426,6 +427,7 @@ def diaparse(parser, conllu):
         parser_input.append(words)
 
     dataset = parser.predict(parser_input, prob=True)
+    torch.cuda.empty_cache()
 
     out_parses = []
     for sent in dataset.sentences:
@@ -549,6 +551,10 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
             tokenized = toks_to_sents(tokenized)
         else:
             tokenized = flair_sent_splitter.split(tokenized)
+            if filecount == 1:
+                # Free up GPU memory if no more files need it
+                del flair_sent_splitter
+            torch.cuda.empty_cache()
 
     if out_mode == "pipes":
         return tokenized
