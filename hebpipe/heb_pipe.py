@@ -509,10 +509,13 @@ def download_requirements(marmot_ok=True, models_ok=True):
 
 
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
-        out_mode="conllu", sent_tag=None, preloaded=None, punct_sentencer=False):
+        out_mode="conllu", sent_tag=None, preloaded=None, punct_sentencer=False, from_pipes=False, filecount=1):
 
     data = input_data.replace("\t","")
     data = data.replace("\r","")
+
+    if from_pipes:
+        input_data = input_data.replace("|","")
 
     if preloaded is not None:
         rf_tok, xrenner, flair_sent_splitter, parser = preloaded
@@ -528,12 +531,15 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
     if do_whitespace:
         data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto")
 
-    if do_tok:
-        tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
-        tokenized = "\n".join(tokenized)
-    else:
-        # Assume data is already one token per line
+    if from_pipes:
         tokenized = data
+    else:
+        if do_tok:
+            tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
+            tokenized = "\n".join(tokenized)
+        else:
+            # Assume data is already one token per line
+            tokenized = data
 
     bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
 
@@ -675,6 +681,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     g2.add_argument("-x","--extension", action="store", default='conllu', help='Extension for output files (default: .conllu)')
     g2.add_argument("--dirout", action="store", default=".", help='Optional output directory (default: this dir)')
     g2.add_argument("--punct_sentencer", action="store_true", help='Only use punctuation (.?!) to split sentences (deprecated)')
+    g2.add_argument("--from_pipes", action="store_true", help='Input contains subtoken segmentation with the pipe character (no automatic tokenization is performed)')
     g2.add_argument("--version", action="store_true", help='Print version number and quit')
 
     if "--version" in sys.argv:
@@ -737,11 +744,10 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
         input_text = io.open(infile,encoding="utf8").read()
 
-
         processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.pos, do_lemma=opts.lemma,
                                do_parse=opts.dependencies, do_entity=opts.entities, out_mode=opts.out,
                                sent_tag=opts.sent, preloaded=(rf_tok,xrenner,flair_sent_splitter,dep_parser),
-                                punct_sentencer=opts.punct_sentencer)
+                                punct_sentencer=opts.punct_sentencer,from_pipes=opts.from_pipes, filecount=len(files))
 
         if len(files) > 1:
             with io.open(opts.dirout + os.sep + outfile, 'w', encoding="utf8", newline="\n") as f:
@@ -756,6 +762,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
     fileword = " files\n\n" if len(files) > 1 else " file\n\n"
     sys.stderr.write("\nFinished processing " + str(len(files)) + fileword)
+
 
 if __name__ == "__main__":
     run_hebpipe()
