@@ -42,6 +42,7 @@ data_dir = script_dir + os.sep + "data" + os.sep
 model_dir = script_dir + os.sep + "models" + os.sep
 marmot_path = bin_dir + "Marmot" + os.sep
 
+KNOWN_PUNCT = {'’','“','”'}  # Hardwired tokens to tag as punctutation (unicode glyphs not in training data)
 
 def log_tasks(opts):
     sys.stderr.write("\nRunning tasks:\n" +"="*20 + "\n")
@@ -576,6 +577,17 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         no_sent = re.sub(r'</?s( [^<>]+)?>\n?','',tokenized).strip()
         morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
         morphed = morphed.strip().split("\n")
+        # Clean up tags for OOV glyphs
+        cleaned = []
+        for line in morphed:
+            if "\t" in line:
+                fields = line.split("\t")
+                if fields[1] in KNOWN_PUNCT:  # Hard fix unicode punctuation
+                    fields[5] = "PUNCT"
+                    fields[7] = "_"
+                    line = "\t".join(fields)
+            cleaned.append(line)
+        morphed = cleaned
         morphs = get_col(morphed,7)
         lemmas = get_col(morphed,3)
 
