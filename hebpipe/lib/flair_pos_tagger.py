@@ -2,8 +2,6 @@
 flair_pos_tagger.py
 
 This module trains flair sequence labelers to predict POS and deprel for OTHER modules.
-It is not the final amalgum POS tagger - it produces modules used by other modules,
-such as the ensemble tagger in pos_tagger.py
 """
 
 
@@ -17,7 +15,7 @@ from glob import glob
 
 script_dir = os.path.dirname(os.path.realpath(__file__)) + os.sep
 model_dir = script_dir + ".." + os.sep + "models" + os.sep
-IAHLT_ROOT = ""  # Path to IAHLT HTB repo
+IAHLT_ROOT = "C:\\Uni\\Corpora\\Hebrew\\IAHLT_HTB\\"  # Path to IAHLT HTB repo
 
 class FlairTagger:
 
@@ -244,7 +242,37 @@ class FlairTagger:
         """
         Implement a subset of closed-class words that can only take one of their attested closed class POS tags
         """
-    raise NotImplementedError("Not implemented")
+        output = []
+
+        KNOWN_PUNCT = {'’', '“', '”'}
+        closed = {"except":["IN"],
+                  "or":["CC"],
+                  "another":["DT"],
+                  "be":["VB"]
+                  }
+        # case marking VVG can never be IN:
+        vbg_preps = {("including","IN"):"VBG",("according","IN"):"VBG",("depending","IN"):"VBG",("following","IN"):"VBG",("involving","IN"):"VBG",
+                     ("regarding","IN"):"VBG",("concerning","IN"):"VBG"}
+
+        top100 = {",":",",".":".","of":"IN","is":"VBZ","you":"PRP","for":"IN","was":"VBD","with":"IN","The":"DT","are":"VBP",")":"-RRB-","(":"-LRB-","at":"IN","this":"DT","from":"IN","or":"CC","not":"RB","his":"PRP$","they":"PRP","an":"DT","we":"PRP","n't":"RB","he":"PRP","[":"-LRB-","]":"-RRB-","has":"VBZ","my":"PRP$","their":"PRP$","It":"PRP","were":"VBD","In":"IN","if":"IN","would":"MD","”":"''",";":":","into":"IN","when":"WRB","You":"PRP","also":"RB","she":"PRP","our":"PRP$","been":"VBN","who":"WP","We":"PRP","time":"NN","He":"PRP","This":"DT","its":"PRP$","did":"VBD","two":"CD","these":"DT","many":"JJ","And":"CC","!":".","should":"MD","because":"IN","how":"WRB","If":"IN","n’t":"RB","'re":"VBP","him":"PRP","'m":"VBP","city":"NN","could":"MD","may":"MD","years":"NNS","She":"PRP","really":"RB","now":"RB","new":"JJ","something":"NN","here":"RB","world":"NN","They":"PRP","life":"NN","But":"CC","year":"NN","us":"PRP","between":"IN","different":"JJ","those":"DT","language":"NN","does":"VBZ","same":"JJ","going":"VBG","United":"NNP","day":"NN","few":"JJ","For":"IN","every":"DT","important":"JJ","When":"WRB","things":"NNS","during":"IN","might":"MD","kind":"NN","How":"WRB","system":"NN","thing":"NN","example":"NN","another":"DT","small":"JJ","until":"IN","information":"NN","away":"RB"}
+
+        scores = []
+
+        #VBG must end in ing/in; VBN may not
+        for i, word in enumerate(word_list):
+            pred = pred_list[i]
+            score = score_list[i]
+            if word in top100:
+                output.append(top100[word])
+                scores.append("_")
+            elif (word.lower(),pred) in vbg_preps:
+                output.append(vbg_preps[(word.lower(),pred)])
+                scores.append("_")
+            else:
+                output.append(pred)
+                scores.append(score)
+
+        return output, scores
 
 
 if __name__ == "__main__":
@@ -264,3 +292,5 @@ if __name__ == "__main__":
         tagger = FlairTagger(train=False)
         tagger.predict(in_format=opts.input_format, out_format=opts.output_format,
                 in_path=opts.file)
+
+#-m predict -i conllu -f C:\Uni\Corpora\Hebrew\IAHLT_HTB\he_htb-ud-test.conllu
