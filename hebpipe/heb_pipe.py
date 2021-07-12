@@ -17,6 +17,7 @@ try:  # Module usage
     from .lib.sent_split import toks_to_sents
     from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
     from .lib.flair_sent_splitter import FlairSentSplitter
+    from .lib.flair_pos_tagger import FlairTagger
 except ImportError:  # direct script usage
     from lib.xrenner import Xrenner
     from lib._version import __version__
@@ -25,6 +26,7 @@ except ImportError:  # direct script usage
     from lib.sent_split import toks_to_sents
     from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
     from lib.flair_sent_splitter import FlairSentSplitter
+    from lib.flair_pos_tagger import FlairTagger
 
 PY3 = sys.version_info[0] > 2
 
@@ -484,6 +486,7 @@ def download_requirements(marmot_ok=True, models_ok=True):
         urls.append(models_base + "heb.xrm")
         urls.append(models_base + "heb.lemming")
         urls.append(models_base + "heb.marmot")
+        urls.append(models_base + "heb.flair")
     for u in urls:
         sys.stderr.write("o Downloading from " + str(u) + "\n")
         if "corpling" in u:
@@ -521,7 +524,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         input_data = input_data.replace("|","")
 
     if preloaded is not None:
-        rf_tok, xrenner, flair_sent_splitter, parser = preloaded
+        rf_tok, xrenner, flair_sent_splitter, parser, tagger = preloaded
     else:
         rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
         xrenner = Xrenner(model=model_dir + "heb.xrm")
@@ -530,6 +533,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         else:
             flair_sent_splitter = None
         parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser")
+        tagger = None if not do_tag else FlairTagger()
 
     if do_whitespace:
         data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto")
@@ -570,6 +574,12 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         tokenized = "\n".join(retokenized)
 
     if do_tag:
+        # Flair
+        to_tag = conllize(tokenized,element="s",super_mapping=bound_group_map)
+        tagged_conllu = tagger.predict(to_tag, as_text=True)
+        pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
+
+        # Marmot
         if platform.system() == "Windows":
             tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
         else:
@@ -579,15 +589,18 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         morphed = morphed.strip().split("\n")
         # Clean up tags for OOV glyphs
         cleaned = []
+        toknum = 0
         for line in morphed:
             if "\t" in line:
                 fields = line.split("\t")
+                fields[5] = pos_tags[toknum]  # Insert flair tags
                 if fields[1] in KNOWN_PUNCT:  # Hard fix unicode punctuation
                     fields[5] = "PUNCT"
                     fields[7] = "_"
-                    line = "\t".join(fields)
+                line = "\t".join(fields)
+                toknum += 1
             cleaned.append(line)
-        morphed = cleaned
+        #morphed = cleaned
         morphs = get_col(morphed,7)
         lemmas = get_col(morphed,3)
 
@@ -736,6 +749,9 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
             else:
                 sys.stderr.write("Aborting\n")
                 sys.exit(0)
+        tagger = FlairTagger()
+    else:
+        tagger = None
 
     if dotok:  # Pre-load stacked tokenizer for entire batch
         rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
@@ -764,7 +780,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
         processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.pos, do_lemma=opts.lemma,
                                do_parse=opts.dependencies, do_entity=opts.entities, out_mode=opts.out,
-                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,flair_sent_splitter,dep_parser),
+                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,flair_sent_splitter,dep_parser, tagger),
                                 punct_sentencer=opts.punct_sentencer,from_pipes=opts.from_pipes, filecount=len(files))
 
         if len(files) > 1:
