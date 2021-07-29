@@ -36,7 +36,7 @@ PClitic = ""
 FClitic = ""
 
 
-def tokenize(text, abbr=None, add_sents=False):
+def tokenize(text, abbr=None, add_sents=False, from_pipes=False):
 
     output = ""
     if add_sents:
@@ -47,6 +47,12 @@ def tokenize(text, abbr=None, add_sents=False):
                 lines.append("<s>" + line + "</s>")
     else:
         lines = text.split("\n")
+
+    if from_pipes:  # Text is already whitespace tokenized
+        data = "\n".join(lines)
+        data = data.replace("<s>","\n<s>\n").replace("</s>","\n</s>\n")
+        data = re.sub(r'\n+',r'\n',data)
+        return "\n".join(data.split())
 
     # Read the list of abbreviations and words
     Token = set([])
@@ -261,7 +267,7 @@ def add_space_after(plain_text, conllu):
         output.append(line)
 
     output = "\n".join(output)
-    output = move_binyan(output)
+    #output = move_binyan(output)
 
     d = DepEdit(config_file=[])
     output = d.run_depedit(output,sent_text=True)

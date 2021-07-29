@@ -6,6 +6,10 @@ import tempfile
 import subprocess
 from glob import glob
 from diaparser.parsers import Parser
+from stanza.utils.conll import CoNLL
+from depedit import DepEdit
+import stanza
+from stanza.models.common.doc import Document
 import torch
 
 from rftokenizer import RFTokenizer
@@ -45,6 +49,24 @@ model_dir = script_dir + os.sep + "models" + os.sep
 marmot_path = bin_dir + "Marmot" + os.sep
 
 KNOWN_PUNCT = {'’','“','”'}  # Hardwired tokens to tag as punctutation (unicode glyphs not in training data)
+morph_deped = DepEdit(config_file=lib_dir+"partial_morph.ini")
+tags = {"NOUN", "VERB", "ADJ", "ADV", "PROPN"}
+lex = open(data_dir + "heb.lemma", encoding="utf8").read().strip().split("\n")
+lex = [l for l in lex if "\t" in l]
+lex = [l for l in lex if l.split("\t")[1] in tags]
+lex = {l.split("\t")[0] + "\t" + l.split("\t")[1]: l.split("\t")[2] for l in lex if "\t" in l}
+
+
+def init_lemmatizer(cpu=False, no_post_process=False):
+    lemmatizer = stanza.Pipeline("he", package="htb", processors="lemma", tokenize_no_ssplit=True,
+                         tokenize_pretokenized=True,
+                          lemma_pretagged=True,
+                          depparse_pretagged=True,
+                          use_gpu=not cpu,
+                          lemma_model_path=model_dir + "stanza" + os.sep + "he_lemmatizer.pt")
+    lemmatizer.do_post_process = False if no_post_process else True
+    return lemmatizer
+
 
 def log_tasks(opts):
     sys.stderr.write("\nRunning tasks:\n" +"="*20 + "\n")
@@ -420,6 +442,57 @@ def inject_tags(in_sgml,insertion_specs,around_tag="norm",inserted_tag="mwe"):
     return "\n".join(outlines)
 
 
+def lemmatize(lemmatizer, conllu, morphs):
+    def clean_final(text):
+        finals = {"פ":"ף","כ":"ך","מ":"ם","נ":"ן","צ":"ץ"}
+        if text[-1] in finals:
+            text = text[:-1] + finals[text[-1]]
+        return text
+
+    def post_process(word, pos, lemma, morph):
+        if word == lemma:
+            if word + "\t" + pos in lex:
+                if pos == "VERB" and "Fut" in morph:
+                    lemma = lex[word + "\t" + pos]
+                if pos == "VERB" and "Pres" in morph:
+                    lemma = lex[word + "\t" + pos]
+                if pos == "VERB" and "Part" in morph:
+                    lemma = lex[word + "\t" + pos]
+                if pos in ["NOUN", "ADJ"] and "Plur" in morph:
+                    lemma = lex[word + "\t" + pos]
+            else:
+                if "Plur" in morph and pos in ["NOUN", "ADJ"] and (
+                        word.endswith("ים") or word.endswith("ות")):
+                    lemma = lemma[:-2]
+                    if word.endswith("ות"):
+                        lemma += "ה"
+                    lemma = clean_final(lemma)
+        return lemma
+
+    uposed = [[l.split("\t") for l in s.split("\n")] for s in conllu.strip().split("\n\n")]
+    dicts = CoNLL.convert_conll(uposed)
+    for sent in dicts:
+        for tok in sent:
+            tok["id"] = int(tok["id"][0])
+    doc = Document(dicts)
+    lemmatized = lemmatizer(doc)
+    output = []
+    counter = 0
+    for sent in lemmatized.sentences:
+        for tok in sent.tokens:
+            word = tok.words[0]
+            lemma = word.lemma
+            if lemmatizer.do_post_process:
+                lemma = post_process(word.text, word.upos, word.lemma, morphs[counter])
+            row = [str(word.id), word.text, lemma, word.upos, word.xpos, '_', str(word.head), "_", "_", "_"]
+            output.append("\t".join(row))
+            counter += 1
+        output.append("")
+    lemmatized = "\n".join(output)
+    lemmatized = get_col(lemmatized,2)
+
+    return lemmatized
+
 def diaparse(parser, conllu):
     sents = conllu.strip().split("\n\n")
     parser_input = []
@@ -442,76 +515,41 @@ def diaparse(parser, conllu):
 
 
 def check_requirements():
-    marmot_OK = True
     models_OK = True
-    marmot = marmot_path + "marmot.jar"
-    if not os.path.exists(marmot):
-        sys.stderr.write("! Marmot not found at ./bin/\n")
-        marmot_OK = False
-    model_files = ["heb.sm" + str(sys.version_info[0]), "heb.xrm", "heb.marmot", "heb.lemming",
-                   "heb.sent","heb.diaparser"]
+    model_files = ["heb.sm" + str(sys.version_info[0]), "heb.xrm",
+                   "heb.flair","heb.morph",
+                   "heb.sent","heb.diaparser",
+                   "stanza" + os.sep + "he_lemmatizer.pt",
+                   "stanza" + os.sep + "he_htb.pretrain.pt",
+                   ]
     for model_file in model_files:
         if not os.path.exists(model_dir + model_file):
             sys.stderr.write("! Model file " + model_file + " missing in ./models/\n")
             models_OK = False
 
-    return marmot_OK, models_OK
+    return models_OK
 
 
-def download_requirements(marmot_ok=True, models_ok=True):
-    import requests, zipfile, shutil, tarfile
-    if not PY3:
-        import StringIO
+def download_requirements(models_ok=True):
     urls = []
-    if not marmot_ok:
-        if not os.path.exists(bin_dir + "Marmot"):
-            os.makedirs(bin_dir + "Marmot")
-        marmot_base_url = "http://cistern.cis.lmu.de/marmot/bin/CURRENT/"
-        marmot_current = requests.get(marmot_base_url).text
-        files = re.findall(r'href="((?:marmot|trove)[^"]+jar)"',marmot_current)
-        marmot_file = ""
-        trove_file = ""
-        for f in files:
-            if f.startswith("marmot"):
-                marmot_file = f
-            elif f.startswith("trove"):
-                trove_file = f
-        urls.append(marmot_base_url + marmot_file)
-        urls.append(marmot_base_url + trove_file)
     if not models_ok:
         models_base = "http://corpling.uis.georgetown.edu/amir/download/heb_models_v2/"
         urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
         urls.append(models_base + "heb.diaparser")
         urls.append(models_base + "heb.sent")
         urls.append(models_base + "heb.xrm")
-        urls.append(models_base + "heb.lemming")
-        urls.append(models_base + "heb.marmot")
         urls.append(models_base + "heb.flair")
+        urls.append(models_base + "heb.morph")
+        urls.append(models_base + "he_htb.pretrain.pt")
+        urls.append(models_base + "he_lemmatizer.pt")
     for u in urls:
         sys.stderr.write("o Downloading from " + str(u) + "\n")
-        if "corpling" in u:
-            base_name = u[u.rfind("/") + 1:]
-            urlretrieve(u,model_dir + base_name)
+        base_name = u[u.rfind("/") + 1:]
+        if "he_" in base_name:
+            urlretrieve(u, model_dir + "stanza" + os.sep + base_name)
         else:
-            r = requests.get(u, stream=True)
-            if PY3:
-                file_contents = io.BytesIO(r.content)
-            else:
-                file_contents = StringIO.StringIO(r.content)
-            if u.endswith("gz"):
-                z = tarfile.open(fileobj=file_contents, mode="r:gz")
-                z.extractall(path=bin_dir)
-            elif u.endswith("jar"):
-                if "trove" in u:
-                    with open(bin_dir + "Marmot" + os.sep + "trove.jar", 'wb') as f:
-                        f.write(r.content)
-                elif "marmot" in u:
-                    with open(bin_dir + "Marmot" + os.sep + "marmot.jar", 'wb') as f:
-                        f.write(r.content)
+            urlretrieve(u, model_dir + base_name)
     sys.stderr.write("\n")
-    # Copy java dependency model files to tool working dirs
-    shutil.copyfile(model_dir+"heb.marmot",bin_dir+"Marmot" + os.sep + "heb.marmot")
-    shutil.copyfile(model_dir+"heb.lemming",bin_dir+"Marmot" + os.sep + "heb.lemming")
 
 
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
@@ -524,7 +562,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         input_data = input_data.replace("|","")
 
     if preloaded is not None:
-        rf_tok, xrenner, flair_sent_splitter, parser, tagger = preloaded
+        rf_tok, xrenner, flair_sent_splitter, parser, tagger, morpher, lemmatizer = preloaded
     else:
         rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
         xrenner = Xrenner(model=model_dir + "heb.xrm")
@@ -532,11 +570,13 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
             flair_sent_splitter = FlairSentSplitter(model_path=model_dir + "heb.sent")
         else:
             flair_sent_splitter = None
-        parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser")
+        parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
         tagger = None if not do_tag else FlairTagger()
+        morpher = None if not do_tag else FlairTagger(morph=True)
+        lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
 
     if do_whitespace:
-        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto")
+        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto", from_pipes=from_pipes)
 
     if from_pipes:
         tokenized = data
@@ -576,35 +616,53 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
     if do_tag:
         # Flair
         to_tag = conllize(tokenized,element="s",super_mapping=bound_group_map)
-        tagged_conllu = tagger.predict(to_tag, as_text=True)
+        tagged_conllu = tagger.predict(to_tag, in_format="conllu", as_text=True)
+        # Uncomment to test lemmatizer with gold POS tags
+        #tagged_conllu = io.open("he_htb-ud-test.conllu",encoding="utf8").read()
+        #opts = type('', (), {"quiet":False, "kill":"both"})()
+        #d = DepEdit(config_file=[],options=opts)
+        #tagged_conllu = d.run_depedit(tagged_conllu)
         pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
 
-        # Marmot
-        if platform.system() == "Windows":
-            tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+        #morpher = None
+        if morpher is None:
+            # Marmot
+            if platform.system() == "Windows":
+                tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+            else:
+                tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar:trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+            no_sent = re.sub(r'</?s( [^<>]+)?>\n?','',tokenized).strip()
+            morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
+            morphed = morphed.strip().split("\n")
+            # Clean up tags for OOV glyphs
+            cleaned = []
+            toknum = 0
+            for line in morphed:
+                if "\t" in line:
+                    fields = line.split("\t")
+                    fields[5] = pos_tags[toknum]  # Insert flair tags
+                    if fields[1] in KNOWN_PUNCT:  # Hard fix unicode punctuation
+                        fields[5] = "PUNCT"
+                        fields[7] = "_"
+                    line = "\t".join(fields)
+                    toknum += 1
+                cleaned.append(line)
+            # morphed = cleaned
+            morphs = get_col(morphed, 7)
+            lemmas = get_col(morphed, 3)
+            tagged = inject_col(morphed, tokenized, 5)
         else:
-            tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar:trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
-        no_sent = re.sub(r'</?s( [^<>]+)?>\n?','',tokenized).strip()
-        morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
-        morphed = morphed.strip().split("\n")
-        # Clean up tags for OOV glyphs
-        cleaned = []
-        toknum = 0
-        for line in morphed:
-            if "\t" in line:
-                fields = line.split("\t")
-                fields[5] = pos_tags[toknum]  # Insert flair tags
-                if fields[1] in KNOWN_PUNCT:  # Hard fix unicode punctuation
-                    fields[5] = "PUNCT"
-                    fields[7] = "_"
-                line = "\t".join(fields)
-                toknum += 1
-            cleaned.append(line)
-        #morphed = cleaned
-        morphs = get_col(morphed,7)
-        lemmas = get_col(morphed,3)
+            # flair
+            morphed = morpher.predict(tagged_conllu, in_format="conllu", as_text=True, tags=True)
+            morphs = get_col(morphed, 4)
+            # Uncomment to test with gold morphology from tagged_conllu
+            #morphs = get_col(tagged_conllu, 5)
+            #morphed = inject_col(morphs, tagged_conllu, into_col=5, skip_supertoks=True)
+            zeros = ["0" for i in range(len(morphs))]
+            zero_conllu = inject_col(zeros,tagged_conllu,into_col=6, skip_supertoks=True)
+            lemmas = lemmatize(lemmatizer,zero_conllu,morphs)
+            tagged = inject_col(tagged_conllu,tokenized,4)
 
-        tagged = inject_col(morphed,tokenized,5)
         if do_lemma:
             lemmatized = inject_col(lemmas,tagged,-1)
         else:
@@ -635,6 +693,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
                              attrs_as_comments=True, ten_cols=True)
         parsed = diaparse(parser, conllized)
+        parsed = morph_deped.run_depedit(parsed)
 
         if do_entity:
             xrenner.docname = "_"
@@ -710,6 +769,8 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     g2 = parser.add_argument_group("less common options")
     g2.add_argument("-q","--quiet", action="store_true", help='Suppress verbose messages')
     g2.add_argument("-x","--extension", action="store", default='conllu', help='Extension for output files (default: .conllu)')
+    g2.add_argument("--cpu", action="store_true", help='Use CPU instead of GPU (slower)')
+    g2.add_argument("--disable_lex", action="store_true", help='Do not use lexicon during lemmatization')
     g2.add_argument("--dirout", action="store", default=".", help='Optional output directory (default: this dir)')
     g2.add_argument("--punct_sentencer", action="store_true", help='Only use punctuation (.?!) to split sentences (deprecated)')
     g2.add_argument("--from_pipes", action="store_true", help='Input contains subtoken segmentation with the pipe character (no automatic tokenization is performed)')
@@ -721,6 +782,12 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
     opts = parser.parse_args()
     opts = diagnose_opts(opts)
+
+    if opts.cpu:
+        import flair
+        flair.device = torch.device('cpu')
+        torch.cuda.is_available = lambda: False
+
     dotok = opts.tokenize
 
     if not opts.quiet:
@@ -736,22 +803,26 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
     # Check if models, Marmot and Malt Parser are available
     if opts.pos or opts.lemma or opts.morph or opts.dependencies or opts.tokenize or opts.entities:
-        marmot_OK, models_OK = check_requirements()
-        if ((opts.pos or opts.lemma or opts.morph) and not marmot_OK) or not models_OK:
+        models_OK = check_requirements()
+        if not models_OK:
             sys.stderr.write("! You are missing required software:\n")
-            if (opts.pos or opts.lemma or opts.morph) and not marmot_OK:
-                sys.stderr.write(" - Tagging, lemmatization and morphological analysis require Marmot\n")
+            if (opts.pos or opts.lemma or opts.morph):
+                sys.stderr.write(" - Tagging, lemmatization and morphological analysis require models\n")
             if not models_OK:
                 sys.stderr.write(" - Model files in models/ are missing\n")
             response = inp("Attempt to download missing files? [Y/N]\n")
             if response.upper().strip() == "Y":
-                download_requirements(marmot_OK,models_OK)
+                download_requirements(models_OK)
             else:
                 sys.stderr.write("Aborting\n")
                 sys.exit(0)
         tagger = FlairTagger()
+        morpher = FlairTagger(morph=True)
+        lemmatizer = init_lemmatizer(cpu=opts.cpu, no_post_process=opts.disable_lex)
     else:
         tagger = None
+        morpher = None
+        lemmatizer = None
 
     if dotok:  # Pre-load stacked tokenizer for entire batch
         rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
@@ -780,7 +851,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
         processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.pos, do_lemma=opts.lemma,
                                do_parse=opts.dependencies, do_entity=opts.entities, out_mode=opts.out,
-                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,flair_sent_splitter,dep_parser, tagger),
+                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,flair_sent_splitter,dep_parser, tagger, morpher, lemmatizer),
                                 punct_sentencer=opts.punct_sentencer,from_pipes=opts.from_pipes, filecount=len(files))
 
         if len(files) > 1:
@@ -799,4 +870,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
 
 if __name__ == "__main__":
+    import logging
+    logging.disable(logging.INFO)
     run_hebpipe()

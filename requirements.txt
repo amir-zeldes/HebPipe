@@ -9,3 +9,4 @@ joblib
 xmltodict
 diaparser
 flair==0.6.1
+stanza

@@ -49,7 +49,7 @@ Or install manually:
   * Clone this repository into the directory that the script should run in (git clone https://github.com/amir-zeldes/HebPipe)
   * In that directory, install the dependencies under **Requirements**, e.g. by running `python setup.py install` or `pip install -r requirements.txt`
   
-Installing should get all Python dependencies, but **you will need 64 bit Java** installed and available on your path (see details below). Models can be downloaded automatically by the script on its first run.
+Models can be downloaded automatically by the script on its first run.
   
 ## Requirements
 
@@ -73,13 +73,10 @@ Note that some versions of Python + Windows do not install numpy correctly from 
 
 `pip install c:\some_directory\numpy‑1.15.0+mkl‑cp27‑cp27m‑win_amd64.whl`
 
-### External dependencies
-
-The pipeline also requires **java** to be available (for parsing, tagging and morphological disambiguation). For high performance and ability to process long sentences, Java is invoked by HebPipe with 2 GB of RAM, meaning you will need a 64 bit version of Java (alternatively, replace `Xmx2g` in `heb_pipe.py` with a lower value, though longer sentences may then crash). You will also need binaries of Marmot and MaltParser 1.9.1 if you want to use POS tagging, morphology and parsing. These are not included in the distribution but **the script will offer to attempt to download them if they are missing**.
 
 ### Model files
 
-Model files are too large to include in the standard GitHub repository. The software will offer to download them automatically. The latest models can also be downloaded manually at https://corpling.uis.georgetown.edu/amir/download/heb_models/. 
+Model files are too large to include in the standard GitHub repository. The software will offer to download them automatically. The latest models can also be downloaded manually at https://corpling.uis.georgetown.edu/amir/download/heb_models_v2/. 
 
 ## Command line usage
 

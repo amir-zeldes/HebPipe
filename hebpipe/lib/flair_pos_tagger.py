@@ -15,21 +15,39 @@ from glob import glob
 
 script_dir = os.path.dirname(os.path.realpath(__file__)) + os.sep
 model_dir = script_dir + ".." + os.sep + "models" + os.sep
-IAHLT_ROOT = "C:\\Uni\\Corpora\\Hebrew\\IAHLT_HTB\\"  # Path to IAHLT HTB repo
+IAHLT_ROOT = "IAHLT_HTB" + os.sep  # Path to IAHLT HTB repo
+TARGET_FEATS = {"Gender","Number","Tense","VerbForm","Voice","HebBinyan","Definite"}
 
 class FlairTagger:
 
-    def __init__(self, train=False):
+    def __init__(self, train=False, morph=False):
         if not train:
-            model_name = model_dir + "heb.flair"
-            self.model = SequenceTagger.load(model_name)
+            if morph:
+                self.model = SequenceTagger.load(model_dir + "heb.morph")
+            else:
+                self.model = SequenceTagger.load(model_dir + "heb.flair")
 
     @staticmethod
-    def make_pos_data():
+    def make_pos_data(tags=False):
+        def filter_morph(feats):
+            if feats == "_":
+                return "O"
+            else:
+                annos = []
+                for f in feats.split("|"):
+                    k, v = f.split("=")
+                    if k in TARGET_FEATS:
+                        annos.append(k+"="+v)
+                if len(annos) > 0:
+                    return "|".join(annos)
+                else:
+                    return "O"
+
         files = glob(IAHLT_ROOT + "*.conllu")
         train = test = dev = ""
         super_tok_len = 0
         super_tok_start = False
+        suff = "_morph" if tags else ""
         for file_ in files:
             output = []
             lines = io.open(file_,encoding="utf8").readlines()
@@ -54,7 +72,11 @@ class FlairTagger:
                             super_tok_position = "E"
                     else:
                         super_tok_position = "O"
-                    output.append(fields[1] + "\t" + super_tok_position + "\t" + fields[4])
+                    if tags:
+                        morph = filter_morph(fields[5])
+                        output.append(fields[1] + "\t" + super_tok_position + "\t" + fields[4] + "\t" + morph)
+                    else:
+                        output.append(fields[1] + "\t" + super_tok_position + "\t" + fields[4])
                 elif len(line.strip()) == 0:
                     if output[-1] != "":
                         output.append("")
@@ -64,14 +86,14 @@ class FlairTagger:
                 test += "\n".join(output)
             else:
                 train += "\n".join(output)
-        with io.open("tagger" + os.sep + "heb_train.txt", 'w', encoding="utf8",newline="\n") as f:
+        with io.open("tagger" + os.sep + "heb_train"+suff+".txt", 'w', encoding="utf8",newline="\n") as f:
             f.write(train)
-        with io.open("tagger" + os.sep + "heb_dev.txt", 'w', encoding="utf8",newline="\n") as f:
+        with io.open("tagger" + os.sep + "heb_dev"+suff+".txt", 'w', encoding="utf8",newline="\n") as f:
             f.write(dev)
-        with io.open("tagger" + os.sep + "heb_test.txt", 'w', encoding="utf8",newline="\n") as f:
+        with io.open("tagger" + os.sep + "heb_test"+suff+".txt", 'w', encoding="utf8",newline="\n") as f:
             f.write(test)
 
-    def train(self, cuda_safe=True, positional=True):
+    def train(self, cuda_safe=True, positional=True, tags=False):
         if cuda_safe:
             # Prevent CUDA Launch Failure random error, but slower:
             import torch
@@ -87,30 +109,45 @@ class FlairTagger:
 
         # define columns
         columns = {0: "text", 1: "super", 2: "pos"}
+        suff = ""
+        if positional:
+            columns[1] = "super"
+            columns[2] = "pos"
+        if tags:
+            columns[3] = "morph"
+            suff = "_morph"
 
-        self.make_pos_data()
+        self.make_pos_data(tags=tags)
 
         corpus: Corpus = ColumnCorpus(
             data_folder, columns,
-            train_file="heb_train.txt",
-            test_file="heb_test.txt",
-            dev_file="heb_dev.txt",
+            train_file="heb_train"+suff+".txt",
+            test_file="heb_test"+suff+".txt",
+            dev_file="heb_dev"+suff+".txt",
         )
 
         # 2. what tag do we want to predict?
-        tag_type = 'pos'
+        tag_type = 'pos' if not tags else "morph"
 
         # 3. make the tag dictionary from the corpus
         tag_dictionary = corpus.make_tag_dictionary(tag_type=tag_type)
         print(tag_dictionary)
 
         # 4. initialize embeddings
-        embeddings: TransformerWordEmbeddings = TransformerWordEmbeddings('onlplab/alephbert-base')
+        embeddings: TransformerWordEmbeddings = TransformerWordEmbeddings('onlplab/alephbert-base',)
         if positional:
-            positions: OneHotEmbeddings = OneHotEmbeddings(corpus=corpus, field="super")
-            stacked: StackedEmbeddings = StackedEmbeddings([embeddings,positions])
+            positions: OneHotEmbeddings = OneHotEmbeddings(corpus=corpus, field="super", embedding_length=5)
+            if tags:
+                tag_emb: OneHotEmbeddings = OneHotEmbeddings(corpus=corpus, field="pos", embedding_length=17)
+                stacked: StackedEmbeddings = StackedEmbeddings([embeddings,positions,tag_emb])
+            else:
+                stacked: StackedEmbeddings = StackedEmbeddings([embeddings, positions])
         else:
-            stacked = embeddings
+            if tags:
+                tag_emb: OneHotEmbeddings = OneHotEmbeddings(corpus=corpus, field="pos", embedding_length=17)
+                stacked: StackedEmbeddings = StackedEmbeddings([embeddings,tag_emb])
+            else:
+                stacked = embeddings
 
         # 5. initialize sequence tagger
         tagger: SequenceTagger = SequenceTagger(hidden_size=256,
@@ -131,7 +168,7 @@ class FlairTagger:
                       mini_batch_size=15,
                       max_epochs=150)
 
-    def predict(self, in_path=None, in_format="flair", out_format="conllu", as_text=False):
+    def predict(self, in_path=None, in_format="flair", out_format="conllu", as_text=False, tags=False):
         model = self.model
         tagcol = 4
 
@@ -154,13 +191,20 @@ class FlairTagger:
                     sents.append(Sentence(" ".join(words),use_tokenizer=lambda x:x.split(" ")))
                     for i, word in enumerate(sents[-1]):
                         word.add_label("super",positions[i])
+                        if tags:
+                            word.add_label("pos",true_pos[i])
                     words = []
                     positions = []
+                    true_pos = []
             else:
                 if in_format == "flair":
                     words.append(line.split("\t")[0])
                     positions.append(line.split("\t")[1])
-                    true_tags.append(line.split("\t")[2]) if "\t" in line else true_tags.append("")
+                    if tags:
+                        true_pos.append(line.split("\t")[2])
+                        true_tags.append(line.split("\t")[3]) if "\t" in line else true_tags.append("")
+                    else:
+                        true_tags.append(line.split("\t")[2]) if "\t" in line else true_tags.append("")
                 else:
                     if "\t" in line:
                         fields = line.split("\t")
@@ -195,15 +239,15 @@ class FlairTagger:
         words = []
         for i, sent in enumerate(sents):
             for tok in sent.tokens:
-                pred = tok.labels[1].value
-                score = str(tok.labels[1].score)
+                if tags:
+                    pred = tok.labels[2].value
+                    score = str(tok.labels[2].score)
+                else:
+                    pred = tok.labels[1].value
+                    score = str(tok.labels[1].score)
                 preds.append(pred)
                 scores.append(score)
                 words.append(tok.text)
-
-        do_postprocess = False
-        if do_postprocess:
-            preds, scores = self.post_process(words, preds, scores)
 
         toknum = 0
         output = []
@@ -218,7 +262,8 @@ class FlairTagger:
                 if len(score)>5:
                     score = score[:5]
                 if out_format == "conllu":
-                    fields = [str(tid),tok.text,"_",pred,pred,"_","_","_","_"]
+                    pred = pred if not pred == "O" else "_"
+                    fields = [str(tid),tok.text,"_",pred,pred,"_","_","_","_","_"]
                     output.append("\t".join(fields))
                     tid+=1
                 elif out_format == "xg":
@@ -237,49 +282,13 @@ class FlairTagger:
             with io.open(script_dir + "pos-dependencies" +os.sep + "flair-"+partition+"-pred." + ext,'w',encoding="utf8",newline="\n") as f:
                 f.write("\n".join(output))
 
-    @staticmethod
-    def post_process(word_list, pred_list, score_list, softmax_list=None):
-        """
-        Implement a subset of closed-class words that can only take one of their attested closed class POS tags
-        """
-        output = []
-
-        KNOWN_PUNCT = {'’', '“', '”'}
-        closed = {"except":["IN"],
-                  "or":["CC"],
-                  "another":["DT"],
-                  "be":["VB"]
-                  }
-        # case marking VVG can never be IN:
-        vbg_preps = {("including","IN"):"VBG",("according","IN"):"VBG",("depending","IN"):"VBG",("following","IN"):"VBG",("involving","IN"):"VBG",
-                     ("regarding","IN"):"VBG",("concerning","IN"):"VBG"}
-
-        top100 = {",":",",".":".","of":"IN","is":"VBZ","you":"PRP","for":"IN","was":"VBD","with":"IN","The":"DT","are":"VBP",")":"-RRB-","(":"-LRB-","at":"IN","this":"DT","from":"IN","or":"CC","not":"RB","his":"PRP$","they":"PRP","an":"DT","we":"PRP","n't":"RB","he":"PRP","[":"-LRB-","]":"-RRB-","has":"VBZ","my":"PRP$","their":"PRP$","It":"PRP","were":"VBD","In":"IN","if":"IN","would":"MD","”":"''",";":":","into":"IN","when":"WRB","You":"PRP","also":"RB","she":"PRP","our":"PRP$","been":"VBN","who":"WP","We":"PRP","time":"NN","He":"PRP","This":"DT","its":"PRP$","did":"VBD","two":"CD","these":"DT","many":"JJ","And":"CC","!":".","should":"MD","because":"IN","how":"WRB","If":"IN","n’t":"RB","'re":"VBP","him":"PRP","'m":"VBP","city":"NN","could":"MD","may":"MD","years":"NNS","She":"PRP","really":"RB","now":"RB","new":"JJ","something":"NN","here":"RB","world":"NN","They":"PRP","life":"NN","But":"CC","year":"NN","us":"PRP","between":"IN","different":"JJ","those":"DT","language":"NN","does":"VBZ","same":"JJ","going":"VBG","United":"NNP","day":"NN","few":"JJ","For":"IN","every":"DT","important":"JJ","When":"WRB","things":"NNS","during":"IN","might":"MD","kind":"NN","How":"WRB","system":"NN","thing":"NN","example":"NN","another":"DT","small":"JJ","until":"IN","information":"NN","away":"RB"}
-
-        scores = []
-
-        #VBG must end in ing/in; VBN may not
-        for i, word in enumerate(word_list):
-            pred = pred_list[i]
-            score = score_list[i]
-            if word in top100:
-                output.append(top100[word])
-                scores.append("_")
-            elif (word.lower(),pred) in vbg_preps:
-                output.append(vbg_preps[(word.lower(),pred)])
-                scores.append("_")
-            else:
-                output.append(pred)
-                scores.append(score)
-
-        return output, scores
-
 
 if __name__ == "__main__":
     p = ArgumentParser()
     p.add_argument("-m","--mode",choices=["train","predict"],default="predict")
     p.add_argument("-f","--file",default=None,help="Blank for training, blank predict for eval, or file to run predict on")
-    p.add_argument("-p","--positional_embeddings",help="Whether to use positional embeddings within supertokens (MWTs)")
+    p.add_argument("-p","--positional_embeddings",action="store_true",help="Whether to use positional embeddings within supertokens (MWTs)")
+    p.add_argument("-t","--tag_embeddings",action="store_true",help="Whether to use POS tag embeddings for morphology prediction")
     p.add_argument("-i","--input_format",choices=["flair","conllu"],default="flair",help="flair two column training format or conllu")
     p.add_argument("-o","--output_format",choices=["flair","conllu","xg"],default="conllu",help="flair two column training format or conllu")
 
@@ -287,10 +296,8 @@ if __name__ == "__main__":
 
     if opts.mode == "train":
         tagger = FlairTagger(train=True)
-        tagger.train(positional=opts.positional_embeddings)
+        tagger.train(positional=opts.positional_embeddings, tags=opts.tag_embeddings)
     else:
         tagger = FlairTagger(train=False)
         tagger.predict(in_format=opts.input_format, out_format=opts.output_format,
                 in_path=opts.file)
-
-#-m predict -i conllu -f C:\Uni\Corpora\Hebrew\IAHLT_HTB\he_htb-ud-test.conllu
