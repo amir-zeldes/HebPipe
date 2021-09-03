@@ -51,10 +51,20 @@ marmot_path = bin_dir + "Marmot" + os.sep
 KNOWN_PUNCT = {'’','“','”'}  # Hardwired tokens to tag as punctutation (unicode glyphs not in training data)
 morph_deped = DepEdit(config_file=lib_dir+"partial_morph.ini")
 tags = {"NOUN", "VERB", "ADJ", "ADV", "PROPN"}
-lex = open(data_dir + "heb.lemma", encoding="utf8").read().strip().split("\n")
-lex = [l for l in lex if "\t" in l]
-lex = [l for l in lex if l.split("\t")[1] in tags]
-lex = {l.split("\t")[0] + "\t" + l.split("\t")[1]: l.split("\t")[2] for l in lex if "\t" in l}
+lex_data = open(data_dir + "heb.lemma", encoding="utf8").readlines()
+lex = {}
+for l in lex_data:
+    word, tag, lemma = l[:-1].split("\t")
+    if tag in tags:
+        lex["\t".join([word,tag])] = lemma
+
+binyan_data = open(data_dir + "heb.binyan", encoding="utf8").readlines()
+binyan_lookup = {}
+binyan_lemma_lookup = {}
+for l in binyan_data:
+    word, lemma, binyan = l[:-1].split("\t")
+    binyan_lookup[(word,lemma)] = binyan
+    binyan_lemma_lookup[lemma] = binyan
 
 
 def init_lemmatizer(cpu=False, no_post_process=False):
@@ -98,7 +108,6 @@ def log_tasks(opts):
 
 
 def diagnose_opts(opts):
-
     if not opts.pos and not opts.morph and not opts.whitespace and not opts.tokenize and not opts.lemma \
         and not opts.dependencies and not opts.entities and not opts.coref:
         if not opts.quiet:
@@ -493,6 +502,7 @@ def lemmatize(lemmatizer, conllu, morphs):
 
     return lemmatized
 
+
 def diaparse(parser, conllu):
     sents = conllu.strip().split("\n\n")
     parser_input = []
@@ -512,6 +522,29 @@ def diaparse(parser, conllu):
     merged = inject_conllu("\n\n".join(out_parses) + "\n\n", conllu)
 
     return merged
+
+
+def postprocess_morph(feats, words, lemmas):
+    def add_feat(morph, feat):
+        if morph == "_":
+            return feat
+        else:
+            attrs = morph.split("|")
+            attrs = {a.split("=")[0]:a.split("=")[1] for a in attrs}
+            attrs[feat.split("=")[0]] = feat.split("=")[1]
+            return "|".join(sorted([a + "=" + attrs[a] for a in attrs]))
+
+    output = []
+    for i, lemma in enumerate(lemmas):
+        word = words[i]
+        feat = feats[i]
+        if "HebBinyan" in feat:  # Rely on BERT to notice that binyan is needed
+            if (word,lemma) in binyan_lookup:
+                feat = add_feat(feat,"HebBinyan=" + binyan_lookup[(word,lemma)])
+            elif lemma in binyan_lemma_lookup:
+                feat = add_feat(feat,"HebBinyan=" + binyan_lemma_lookup[lemma])
+        output.append(feat)
+    return output
 
 
 def check_requirements():
@@ -615,7 +648,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
     if do_tag:
         # Flair
-        to_tag = conllize(tokenized,element="s",super_mapping=bound_group_map)
+        to_tag = conllize(tokenized,element="s",super_mapping=bound_group_map,attrs_as_comments=True)
         tagged_conllu = tagger.predict(to_tag, in_format="conllu", as_text=True)
         # Uncomment to test lemmatizer with gold POS tags
         #tagged_conllu = io.open("he_htb-ud-test.conllu",encoding="utf8").read()
@@ -649,12 +682,14 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
                 cleaned.append(line)
             # morphed = cleaned
             morphs = get_col(morphed, 7)
+            words = get_col(morphed, 1)
             lemmas = get_col(morphed, 3)
             tagged = inject_col(morphed, tokenized, 5)
         else:
             # flair
             morphed = morpher.predict(tagged_conllu, in_format="conllu", as_text=True, tags=True)
             morphs = get_col(morphed, 4)
+            words = get_col(morphed, 1)
             # Uncomment to test with gold morphology from tagged_conllu
             #morphs = get_col(tagged_conllu, 5)
             #morphed = inject_col(morphs, tagged_conllu, into_col=5, skip_supertoks=True)
@@ -667,6 +702,8 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
             lemmatized = inject_col(lemmas,tagged,-1)
         else:
             lemmatized = tagged
+
+        morphs = postprocess_morph(morphs, words, lemmas)
         morphed = inject_col(morphs,lemmatized,-1)
 
         if not do_parse:
@@ -690,6 +727,12 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
             return tokenized
 
     if do_parse:
+        if filecount == 1:
+            # Free up GPU memory if no more files need it
+            del morpher
+            del tagger
+            torch.cuda.empty_cache()
+
         conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
                              attrs_as_comments=True, ten_cols=True)
         parsed = diaparse(parser, conllized)
