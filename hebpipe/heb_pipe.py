@@ -890,7 +890,10 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
         if not opts.quiet:
             sys.stderr.write("Processing " + base + "\n")
 
-        input_text = io.open(infile,encoding="utf8").read()
+        try:
+            input_text = io.open(infile,encoding="utf8").read().replace("\r","")
+        except UnicodeDecodeError:  # Fallback to support Windows Hebrew encoding
+            input_text = io.open(infile,encoding="cp1255").read().replace("\r","")
 
         processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.pos, do_lemma=opts.lemma,
                                do_parse=opts.dependencies, do_entity=opts.entities, out_mode=opts.out,
