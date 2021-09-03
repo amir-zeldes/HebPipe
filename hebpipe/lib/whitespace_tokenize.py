@@ -36,7 +36,13 @@ PClitic = ""
 FClitic = ""
 
 
-def tokenize(text, abbr=None, add_sents=False, from_pipes=False):
+def tokenize(text, abbr=None, add_sents=False, from_pipes=False, aggressive_hyphenation=True):
+
+    if aggressive_hyphenation:
+        text = re.sub(r'(?<=[א-ת])([–/־-])(?=[א-ת])',r' \1 ', text)
+        text = re.sub(r'(?<= [0-9])([–:־-])(?=[0-9] )',r' \1 ', text)  # sports scores etc.
+        text = re.sub(r'(?<= (?:19|20)[0-9]{2})([–־-])(?=(?:19|20)[0-9]{2}[ ,\.])',r' \1 ', text)  # year ranges
+        text = re.sub(r'(?<= [0-9][0-9])([–־-])(?=[0-9]+%)',r' \1 ', text)  # percentage ranges
 
     output = ""
     if add_sents:
