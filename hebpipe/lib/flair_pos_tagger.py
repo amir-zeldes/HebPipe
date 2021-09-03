@@ -12,6 +12,8 @@ from flair.embeddings import OneHotEmbeddings, TransformerWordEmbeddings, Stacke
 from flair.models import SequenceTagger
 import os, sys, io
 from glob import glob
+from random import seed, shuffle
+seed(42)
 
 script_dir = os.path.dirname(os.path.realpath(__file__)) + os.sep
 model_dir = script_dir + ".." + os.sep + "models" + os.sep
@@ -26,6 +28,109 @@ class FlairTagger:
                 self.model = SequenceTagger.load(model_dir + "heb.morph")
             else:
                 self.model = SequenceTagger.load(model_dir + "heb.flair")
+
+    @staticmethod
+    def make_seg_data():
+        prefixes = {"ב","כ","מ","ל","ה",}
+        suffixes = {"ו","ה","י","ך","ם","ן","הם","הן","כם","כן","יו"}
+        def segs2tag(segs):
+            tag = "X"
+            if len(segs) == 2:
+                if segs[0] == "ו":
+                    tag = "W"
+                elif segs[0] in ["ש","כש"]:
+                    tag = "S"
+                elif segs[0] in prefixes:
+                    tag = "B"
+                if segs[1] in suffixes:
+                    tag += "Y"
+            elif len(segs) == 3:
+                if segs[0] == "ו":
+                    tag = "W"
+                elif segs[0] in ["ש","כש"]:
+                    tag = "S"
+                elif segs[0] in prefixes:
+                    tag = "B"
+                if segs[1] in ["ש","כש"]:
+                    tag += "S"
+                elif segs[1] in prefixes:
+                    tag += "B"
+                if segs[2] in suffixes:
+                    tag += "Y"
+            elif len(segs) > 3:
+                if segs[0] == "ו":
+                    tag = "W"
+                elif segs[0] in ["ש","כש"]:
+                    tag = "S"
+                if segs[1] in ["ש","כש"]:
+                    tag += "S"
+                elif segs[1] in prefixes:
+                    tag += "B"
+                if segs[2] in prefixes:
+                    tag += "B"
+                if segs[-1] in suffixes:
+                    tag += "Y"
+            if tag == "BS":
+                tag = "BB"  # מ+ש, כ+ש
+            elif tag == "WSY":  # ושעיקרה
+                tag = "WBY"
+            elif "XS" in tag:
+                tag = "X"
+            return tag
+
+        def conllu2segs(conllu, target="affixes"):
+            super_length = 0
+            limit = 4  # Maximum bound group length in units, discard sentences with longer groups
+            sents = []
+            words = []
+            labels = []
+            word = []
+            max_len = 0
+            lines = conllu.split("\n")
+            for line in lines:
+                if "\t" in line:
+                    fields = line.split("\t")
+                    if "-" in fields[0]:
+                        start, end = fields[0].split("-")
+                        super_length = int(end) - int(start) + 1
+                    else:
+                        if super_length > 0:
+                            word.append(fields[1])
+                            super_length -= 1
+                            if super_length == 0:
+                                words.append("".join(word))
+                                if target=="count":
+                                    labels.append(str(len(word)))
+                                else:
+                                    labels.append(segs2tag(word))
+                                if len(word) > max_len:
+                                    max_len = len(word)
+                                word = []
+                        else:
+                            words.append(fields[1])
+                            labels.append("O")
+                elif len(line) == 0 and len(words) > 0:
+                    if max_len > limit or " " in "".join(words):  # Reject sentence
+                        max_len = 0
+                    else:
+                        sents.append("\n".join([w + "\t" + l for w, l, in zip(words,labels)]))
+                    words = []
+                    labels = []
+            return "\n\n".join(sents)
+
+        files = glob(IAHLT_ROOT + "seg" + os.sep + "*.conllu")
+        data = ""
+        for file_ in files:
+            data += conllu2segs(io.open(file_,encoding="utf8").read()) + "\n\n"
+        sents = data.strip().split("\n\n")
+        sents = list(set(sents))
+        shuffle(sents)
+        with io.open("tagger" + os.sep + "heb_train_seg.txt", 'w', encoding="utf8",newline="\n") as f:
+            f.write("\n\n".join(sents[:int(-len(sents)/10)]))
+        with io.open("tagger" + os.sep + "heb_dev_seg.txt", 'w', encoding="utf8",newline="\n") as f:
+            f.write("\n\n".join(sents[int(-len(sents)/10):]))
+        with io.open("tagger" + os.sep + "heb_test_seg.txt", 'w', encoding="utf8",newline="\n") as f:
+            f.write("\n\n".join(sents[int(-len(sents)/10):]))
 
     @staticmethod
     def make_pos_data(tags=False):
@@ -93,7 +198,7 @@ class FlairTagger:
         with io.open("tagger" + os.sep + "heb_test"+suff+".txt", 'w', encoding="utf8",newline="\n") as f:
             f.write(test)
 
-    def train(self, cuda_safe=True, positional=True, tags=False):
+    def train(self, cuda_safe=True, positional=True, tags=False, seg=False):
         if cuda_safe:
             # Prevent CUDA Launch Failure random error, but slower:
             import torch
@@ -116,8 +221,13 @@ class FlairTagger:
         if tags:
             columns[3] = "morph"
             suff = "_morph"
-
-        self.make_pos_data(tags=tags)
+        if seg:
+            columns[1] = "seg"
+            del columns[2]
+            self.make_seg_data()
+            suff = "_seg"
+        else:
+            self.make_pos_data(tags=tags)
 
         corpus: Corpus = ColumnCorpus(
             data_folder, columns,
@@ -128,6 +238,8 @@ class FlairTagger:
 
         # 2. what tag do we want to predict?
         tag_type = 'pos' if not tags else "morph"
+        if seg:
+            tag_type = "seg"
 
         # 3. make the tag dictionary from the corpus
         tag_dictionary = corpus.make_tag_dictionary(tag_type=tag_type)
@@ -142,12 +254,14 @@ class FlairTagger:
                 stacked: StackedEmbeddings = StackedEmbeddings([embeddings,positions,tag_emb])
             else:
                 stacked: StackedEmbeddings = StackedEmbeddings([embeddings, positions])
-        else:
+        elif not seg:
             if tags:
                 tag_emb: OneHotEmbeddings = OneHotEmbeddings(corpus=corpus, field="pos", embedding_length=17)
                 stacked: StackedEmbeddings = StackedEmbeddings([embeddings,tag_emb])
             else:
                 stacked = embeddings
+        else:
+            stacked = embeddings
 
         # 5. initialize sequence tagger
         tagger: SequenceTagger = SequenceTagger(hidden_size=256,
@@ -168,7 +282,7 @@ class FlairTagger:
                       mini_batch_size=15,
                       max_epochs=150)
 
-    def predict(self, in_path=None, in_format="flair", out_format="conllu", as_text=False, tags=False):
+    def predict(self, in_path=None, in_format="flair", out_format="conllu", as_text=False, tags=False, seg=False):
         model = self.model
         tagcol = 4
 
@@ -190,7 +304,8 @@ class FlairTagger:
                 if len(words) > 0:
                     sents.append(Sentence(" ".join(words),use_tokenizer=lambda x:x.split(" ")))
                     for i, word in enumerate(sents[-1]):
-                        word.add_label("super",positions[i])
+                        if not seg:
+                            word.add_label("super",positions[i])
                         if tags:
                             word.add_label("pos",true_pos[i])
                     words = []
@@ -199,7 +314,8 @@ class FlairTagger:
             else:
                 if in_format == "flair":
                     words.append(line.split("\t")[0])
-                    positions.append(line.split("\t")[1])
+                    if not seg:
+                        positions.append(line.split("\t")[1])
                     if tags:
                         true_pos.append(line.split("\t")[2])
                         true_tags.append(line.split("\t")[3]) if "\t" in line else true_tags.append("")
@@ -289,6 +405,7 @@ if __name__ == "__main__":
     p.add_argument("-f","--file",default=None,help="Blank for training, blank predict for eval, or file to run predict on")
     p.add_argument("-p","--positional_embeddings",action="store_true",help="Whether to use positional embeddings within supertokens (MWTs)")
     p.add_argument("-t","--tag_embeddings",action="store_true",help="Whether to use POS tag embeddings for morphology prediction")
+    p.add_argument("-s","--seg",action="store_true",help="Whether to train segmentation instead of tagging")
     p.add_argument("-i","--input_format",choices=["flair","conllu"],default="flair",help="flair two column training format or conllu")
     p.add_argument("-o","--output_format",choices=["flair","conllu","xg"],default="conllu",help="flair two column training format or conllu")
 
@@ -296,7 +413,7 @@ if __name__ == "__main__":
 
     if opts.mode == "train":
         tagger = FlairTagger(train=True)
-        tagger.train(positional=opts.positional_embeddings, tags=opts.tag_embeddings)
+        tagger.train(positional=opts.positional_embeddings, tags=opts.tag_embeddings, seg=opts.seg)
     else:
         tagger = FlairTagger(train=False)
         tagger.predict(in_format=opts.input_format, out_format=opts.output_format,
