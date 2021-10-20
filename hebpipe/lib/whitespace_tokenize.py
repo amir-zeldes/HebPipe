@@ -43,6 +43,7 @@ def tokenize(text, abbr=None, add_sents=False, from_pipes=False, aggressive_hyph
         text = re.sub(r'(?<= [0-9])([–:־-])(?=[0-9] )',r' \1 ', text)  # sports scores etc.
         text = re.sub(r'(?<= (?:19|20)[0-9]{2})([–־-])(?=(?:19|20)[0-9]{2}[ ,\.])',r' \1 ', text)  # year ranges
         text = re.sub(r'(?<= [0-9][0-9])([–־-])(?=[0-9]+%)',r' \1 ', text)  # percentage ranges
+        text = re.sub(r'( (?:(?:\d{1,3},)+\d{3}))([–־-])(?=(?:(?:\d{1,3},)+\d{3})[ ,\.])',r'\1 \2 ', text)  # ranges of numbers with thousands sep
 
     output = ""
     if add_sents:
@@ -248,6 +249,7 @@ def add_space_after(plain_text, conllu):
                 break
         return space_prop, plain_text
 
+    plain_text = re.sub(r'<[^<>]+>',"",plain_text)  # Destroy XML
     output = []
     skip = 0
     lines = conllu.split("\n")
