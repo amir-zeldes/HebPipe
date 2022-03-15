@@ -4,7 +4,11 @@ from functools import reduce
 try:
     from time import clock
 except ImportError:
-    from time import process_time as clock
+    try:
+        from time import process_time as clock
+    except ImportError:
+        from time import perf_counter as clock
+
 
 def secondsToStr(t):
     return "%d:%02d:%02d.%03d" % \

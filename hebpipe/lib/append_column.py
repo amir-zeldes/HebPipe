@@ -49,6 +49,10 @@ def inject_col(source_lines, target_lines, col=-1, into_col=None, skip_supertoks
 	if not isinstance(target_lines,list):
 		target_lines = target_lines.split("\n")
 
+	if col != -1:
+		# non-final column requested, ensure source_lines only has lines with tabs
+		source_lines = [l for l in source_lines if "\t" in l]
+
 	for i, source_line in enumerate(source_lines):
 		while len(target_line) == 0:
 			counter +=1

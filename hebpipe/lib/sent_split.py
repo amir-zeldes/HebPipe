@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-def toks_to_sents(text):
+def toks_to_sents(text, split_at_punct=True):
 
 	lines = text.split("\n")
 	output = []
@@ -15,7 +15,7 @@ def toks_to_sents(text):
 		else:
 			if not (line == "<s>" and output[-1] == "<s>") and not (line == "</s>" and output[-1] == "<s>"):
 				output.append(line)
-		if line in [".","!","?"]:
+		if line in [".","!","?"] and split_at_punct:
 			output.append("</s>")
 			output.append("<s>")
 
