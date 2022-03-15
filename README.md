@@ -4,7 +4,7 @@ A simple NLP pipeline for Hebrew text in UTF-8 encoding, using standard componen
 
   * Performs end to end processing, optionally skipping steps as needed:
     * whitespace tokenization
-    * morphological segmentation (excl. insertion of unexpressed articles)
+    * morphological segmentation
     * POS tagging
     * morphological tagging
     * dependency parsing
@@ -66,10 +66,13 @@ The NLP pipeline will run on Python 2.7+ or Python 3.5+ (2.6 and lower are not s
   * xgboost==0.81
   * rftokenizer
   * joblib
+  * flair==0.6.1
+  * stanza
+  * diaparser
 
 You should be able to install these manually via pip if necessary (i.e. `pip install rftokenizer` etc.).
 
-Note that some versions of Python + Windows do not install numpy correctly from pip, in which case you can download compiled binaries for your version of Python + Windows here: https://www.lfd.uci.edu/~gohlke/pythonlibs/, then run for example:
+Note that some older versions of Python + Windows do not install numpy correctly from pip, in which case you can download compiled binaries for your version of Python + Windows here: https://www.lfd.uci.edu/~gohlke/pythonlibs/, then run for example:
 
 `pip install c:\some_directory\numpy‑1.15.0+mkl‑cp27‑cp27m‑win_amd64.whl`
 
@@ -100,10 +103,7 @@ standard module options:
   -d, --dependencies    Parse with dependency parser
   -e, --entities        Add entity spans and types
   -c, --coref           Add coreference annotations
-  -s {auto,none}, --sent {auto,none}
-                        XML tag to split sentences, e.g. sent for <sent ..> or
-                        none for no splitting (otherwise automatic sentence
-                        splitting)
+  -s SENT, --sent SENT  XML tag to split sentences, e.g. sent for <sent ..> or none for no splitting (otherwise automatic sentence splitting)
   -o {pipes,conllu,sgml}, --out {pipes,conllu,sgml}
                         Output CoNLL format, SGML or just tokenize with pipes
 
@@ -111,7 +111,11 @@ less common options:
   -q, --quiet           Suppress verbose messages
   -x EXTENSION, --extension EXTENSION
                         Extension for output files (default: .conllu)
+  --cpu                 Use CPU instead of GPU (slower)
+  --disable_lex         Do not use lexicon during lemmatization
   --dirout DIROUT       Optional output directory (default: this dir)
+  --punct_sentencer     Only use punctuation (.?!) to split sentences (deprecated but faster)
+  --from_pipes          Input contains subtoken segmentation with the pipe character (no automatic tokenization is performed)
   --version             Print version number and quit
 ```
 
@@ -143,4 +147,5 @@ The pipeline accepts the following kinds of input:
   * Plain text, with normal Hebrew whitespace behavior. Newlines are assumed to indicate a sentence break, but longer paragraphs will receive automatic sentence splitting too.
   * Gold super-tokenized: if whitespace tokenization is already done, you can leave out `-w`. The system expect one super-token per line in this case (e.g. <bbyt> is on one line)
   * Gold tokenized: if gold morphological segmentation is already done, you can input one gold token per line.
+  * Pipes: if morphological segmentation is already done, you can also input one super-token per line with sub-tokens separated by pipes - use `--from_pipes` for this option (allows running the segmenter, outputting pipes for manual correction, then continuing NLP processing from pipes)
   * XML sentence tags in input: use -s TAGNAME to indicate an XML tag providing gold sentence boundaries.
