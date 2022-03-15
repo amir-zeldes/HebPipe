@@ -7,7 +7,7 @@ setup(
   description = 'A pipeline for Hebrew NLP',
   author = 'Amir Zeldes',
   author_email = 'amir.zeldes@georgetown.edu',
-  package_data = {'':['README.md','LICENSE.md','requirements.txt'],'hebpipe':['lib/*','data/*','bin/*','models/models_go_here.txt']},
+  package_data = {'':['README.md','LICENSE.md','requirements.txt'],'hebpipe':['lib/*','data/*','bin/*','models/models_go_here.txt','models/stanza/stanza_models_here.txt']},
    install_requires=['numpy','pandas','scipy','joblib','xgboost==0.81','rftokenizer','depedit','xmltodict',
                      'diaparser','flair==0.6.1','stanza','conllu'],
   url = 'https://github.com/amir-zeldes/HebPipe',
