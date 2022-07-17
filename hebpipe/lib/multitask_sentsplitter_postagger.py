@@ -9,13 +9,16 @@ import math
 import gc
 
 from flair.embeddings import TransformerWordEmbeddings
-from flair.data import Sentence
+from flair.data import Sentence, Dictionary
 from transformers import BertModel,BertTokenizerFast
 from lib.allennlp.conditional_random_field import ConditionalRandomField
 from lib.allennlp.time_distributed import TimeDistributed
 from random import sample
 from collections import defaultdict
 from sklearn.metrics import f1_score, precision_score,recall_score
+from lib.crfutils.crf import CRF
+from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
+
 
 from time import time
 
@@ -43,16 +46,19 @@ class PositionalEncoding(nn.Module):
 
 
 class MTLModel(nn.Module):
-    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,batchsize=8,transformernumlayers=6,nhead=8,sequencelength=128):
+    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,batchsize=16,transformernumlayers=6,nhead=8,sequencelength=128):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        #self.device = 'cpu'
-        #self.START_TAG = "<START>"
-        #self.STOP_TAG = "<STOP>"
 
         self.postagset = {'ADJ':0, 'ADP':1, 'ADV':2, 'AUX':3, 'CCONJ':4, 'DET':5, 'INTJ':6, 'NOUN':7, 'NUM':8, 'PRON':9, 'PROPN':10, 'PUNCT':11, 'SCONJ':12, 'SYM':13, 'VERB':14, 'X':15} # derived from HTB and IAHLTWiki trainsets #TODO: add other UD tags?
-        self.sbd_tag2idx = {'B-SENT': 1,'O': 0,}#self.START_TAG:2,self.STOP_TAG:3}
+        self.sbd_tag2idx = {'B-SENT': 1,'O': 0,}
+
+        self.sbdtagset = Dictionary()
+        for key in self.sbd_tag2idx.keys():
+            self.sbdtagset.add_item(key.strip())
+        self.sbdtagset.add_item("<START>")
+        self.sbdtagset.add_item("<STOP>")
 
         self.sequence_length = sequencelength
         self.batch_size = batchsize
@@ -98,9 +104,11 @@ class MTLModel(nn.Module):
         # Intermediate feedforward layer
         self.ffdim = ffdim
         if self.encodertype == 'transformer':
-            self.fflayer = TimeDistributed(nn.Linear(in_features=self.embeddingdim, out_features=self.ffdim)).to(self.device)
+            #self.fflayer = TimeDistributed(nn.Linear(in_features=self.embeddingdim, out_features=self.ffdim)).to(self.device)
+            self.fflayer = nn.Linear(in_features=self.embeddingdim, out_features=self.ffdim).to(self.device)
         else:
-            self.fflayer = TimeDistributed(nn.Linear(in_features=self.rnndim, out_features=self.ffdim)).to(self.device)
+            #self.fflayer = TimeDistributed(nn.Linear(in_features=self.rnndim, out_features=self.ffdim)).to(self.device)
+            self.fflayer = nn.Linear(in_features=self.rnndim, out_features=self.ffdim).to(self.device)
 
         # param init
         for name, param in self.fflayer.named_parameters():
@@ -114,7 +122,7 @@ class MTLModel(nn.Module):
         #self.hidden2postag = TimeDistributed(nn.Linear(in_features=self.ffdim,out_features=len(self.postagset.keys()))).to(self.device)
 
         # Label space for sent splitter
-        self.hidden2sbd = TimeDistributed(nn.Linear(in_features=self.ffdim,out_features=len(self.sbd_tag2idx.keys())).to(self.device))
+        self.hidden2sbd = nn.Linear(in_features=self.ffdim,out_features=len(self.sbdtagset)).to(self.device)
 
         # param init
         for name, param in self.hidden2sbd.named_parameters():
@@ -125,7 +133,9 @@ class MTLModel(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
-        #self.sbdcrf = ConditionalRandomField(len(self.sbd_tag2idx),include_start_end_transitions=False).to(self.device)
+
+        self.sbdcrf = CRF(self.sbdtagset,len(self.sbdtagset),init_from_state_dict=False) # TODO: parameterize
+        self.viterbidecoder = ViterbiDecoder(self.sbdtagset)
 
 
     def forward(self,data):
@@ -201,26 +211,20 @@ class MTLModel(nn.Module):
 
         # logits for sbd
         sbdlogits = self.hidden2sbd(feats)
-        #sbdlogits = torch.squeeze(sbdlogits)
+        sbdlogits = self.sbdcrf(sbdlogits)
+        #sbdlogits = sbdlogits.permute(1,0,2)
 
-        sbdlogits = sbdlogits.permute(0,2,1)
-
-        #sbdloss = self.sbdcrf(sbdlogits, sbdtags)
-        #viterbitags = self.sbdcrf.viterbi_tags(sbdlogits)
-
-        #return None,sbdloss,viterbitags
 
         del embeddings
         del avgembeddings
         del feats
 
-        gc.collect()
         torch.cuda.empty_cache()
 
         return sbdlogits,badrecords
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,learningrate = 0.0001):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,learningrate = 0.00001):
 
         self.mtlmodel = MTLModel(rnndim,rnnnumlayers,rnnbidirectional,rnndropout,encodertype,ffdim)
 
@@ -255,10 +259,12 @@ class Tagger():
         #self.postagloss = nn.CrossEntropyLoss()
         #self.postagloss.to(self.device)
 
-        self.sbdloss = nn.CrossEntropyLoss() #(weight=torch.FloatTensor([1,5]))
-        self.sbdloss.to(self.device)
+        #self.sbdloss = nn.CrossEntropyLoss(weight=torch.FloatTensor([1,5]))
+        #self.sbdloss.to(self.device)
 
-        self.optimizer = torch.optim.Adam(list(self.mtlmodel.encoder.parameters()) +  list(self.mtlmodel.fflayer.parameters()) + list(self.mtlmodel.hidden2sbd.parameters()), lr=learningrate)
+        self.sbdloss = ViterbiLoss(self.mtlmodel.sbdtagset)
+
+        self.optimizer = torch.optim.Adam(list(self.mtlmodel.encoder.parameters()) +  list(self.mtlmodel.fflayer.parameters()) + list(self.mtlmodel.sbdcrf.parameters()) + list(self.mtlmodel.hidden2sbd.parameters()), lr=learningrate)
         #self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[500,2500],gamma=0.01)
         self.evalstep = 20
 
@@ -312,8 +318,6 @@ class Tagger():
             idx += self.stride_size
             snum += 1
 
-
-
         for idx in mapping:
             best = self.mtlmodel.sequence_length
             for m in mapping[idx]:
@@ -327,23 +331,39 @@ class Tagger():
 
         self.mtlmodel.batch_size = len(spans)
 
+        # get the loss
         sbdlogits,badrecords = self.mtlmodel(spans)
-        predictions = torch.argmax(sbdlogits,dim=1)
+        #predictions = torch.argmax(sbdlogits,dim=1)
 
         badrecords = sorted(badrecords,reverse=True)
         for record in badrecords:
             labelspans.pop(record)
+            self.mtlmodel.batch_size -= 1
 
+        labelspans = [label for span in labelspans for label in span]
         labelspans = torch.LongTensor(labelspans).to(self.device)
+
+        lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
+        lengths = torch.LongTensor(lengths).to(self.device)
+
+        score = (sbdlogits, lengths, self.mtlmodel.sbdcrf.transitions)
+        sbdloss = self.sbdloss(score, labelspans)
+
+        # now get the predictions
+        sents = []
+        for span in spans:
+            sents.append(Sentence(span))
+
+        predictions, _ = self.mtlmodel.viterbidecoder.decode(score,False,sents)
 
         labels = []
         for idx in final_mapping:
             snum, position = final_mapping[idx]
-            label = predictions[snum][position].item()
+            label = self.mtlmodel.sbdtagset.get_idx_for_item(predictions[snum][position][0])
 
             labels.append(label)
 
-        loss = self.sbdloss(sbdlogits,labelspans)
+        #loss = self.sbdloss(sbdlogits,labelspans)
 
         del sbdlogits
         del labelspans
@@ -354,7 +374,7 @@ class Tagger():
         #print (torch.cuda.memory_stats("cuda:0"))
 
 
-        return labels,loss.item()
+        return labels,sbdloss.item()
 
     def train(self):
 
@@ -391,7 +411,7 @@ class Tagger():
 
             return dataset
 
-        epochs = 3000
+        epochs = 10000
 
         trainingdata = read_file()
         devdata = read_file(mode='dev')
@@ -407,17 +427,21 @@ class Tagger():
 
             sents = [' '.join([s.split('\t')[0].strip() for s in sls]) for sls in data]
 
+            sbdlogits, badrecords = self.mtlmodel(sents)
+            badrecords = sorted(badrecords, reverse=True)
+
             sbdtags = [[s.split('\t')[2].strip() for s in sls] for sls in data]
-            sbdtags = [[self.mtlmodel.sbd_tag2idx[t] for t in tag] for tag in sbdtags]
-
-            sbdlogits,badrecords = self.mtlmodel(sents)
-            badrecords = sorted(badrecords,reverse=True)
-
             for record in badrecords:
                 sbdtags.pop(record)
+                self.mtlmodel.batch_size -= 1
 
-            sbdtags = torch.LongTensor(sbdtags).to(self.device)
-            sbdloss = self.sbdloss(sbdlogits,sbdtags)
+            sbdtags = torch.tensor([self.mtlmodel.sbdtagset.get_idx_for_item(s) for sbd in sbdtags for s in sbd])
+
+            lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
+            lengths = torch.LongTensor(lengths).to(self.device)
+            scores = (sbdlogits,lengths,self.mtlmodel.sbdcrf.transitions)
+
+            sbdloss = self.sbdloss(scores,sbdtags)
 
             #mtlloss = posloss + sbdloss # uniform weighting. # TODO: learnable weights?
             #mtlloss.backward()
@@ -456,7 +480,7 @@ class Tagger():
 
                         sents = [s.split('\t')[0].strip() for s in slice]
                         goldlabels = [s.split('\t')[2].strip() for s in slice]
-                        goldlabels = [self.mtlmodel.sbd_tag2idx[s] for s in goldlabels]
+                        goldlabels = [self.mtlmodel.sbdtagset.get_idx_for_item(s) for s in goldlabels]
 
                         preds,devloss = self.shingle_predict(sents,goldlabels)
                         totaldevloss += devloss
@@ -478,7 +502,7 @@ class Tagger():
                     precision = precision_score(allgold,allpreds)
                     recall = recall_score(allgold,allpreds)
 
-                    self.writer.add_scalar("dev_loss",round(totaldevloss,2),int(epoch / self.evalstep))
+                    self.writer.add_scalar("dev_loss",round(totaldevloss/len(devdata),2),int(epoch / self.evalstep))
                     self.writer.add_scalar("dev_f1", round(f1,2), int(epoch / self.evalstep))
                     self.writer.add_scalar("dev_precision", round(precision, 2), int(epoch / self.evalstep))
                     self.writer.add_scalar("dev_recall", round(recall, 2), int(epoch / self.evalstep))
@@ -487,8 +511,8 @@ class Tagger():
                     print ('dev f1:' + str(f1))
                     print('dev precision:' + str(precision))
                     print('dev recall:' + str(recall))
+                    print ('\n')
 
-                torch.cuda.empty_cache()
                 self.mtlmodel.train()
                 #self.mtlmodel.batch_size = old_batch_size
 
