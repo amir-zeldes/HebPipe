@@ -3,27 +3,21 @@ import torch
 import torch.nn as nn
 import os
 import shutil
-import flair
 import random
 import math
-import gc
 
-from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence, Dictionary
 from transformers import BertModel,BertTokenizerFast
-from lib.allennlp.conditional_random_field import ConditionalRandomField
-from lib.allennlp.time_distributed import TimeDistributed
 from random import sample
 from collections import defaultdict
 from sklearn.metrics import f1_score, precision_score,recall_score
 from lib.crfutils.crf import CRF
 from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
 
-
 from time import time
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256,garbage_collection_threshold:0.2"
-
+SAMPLE_SIZE = 16
 
 class PositionalEncoding(nn.Module):
 
@@ -46,13 +40,13 @@ class PositionalEncoding(nn.Module):
 
 
 class MTLModel(nn.Module):
-    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,batchsize=16,transformernumlayers=6,nhead=8,sequencelength=128):
+    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,batchsize=SAMPLE_SIZE,transformernumlayers=6,nhead=8,sequencelength=128):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.postagset = {'ADJ':0, 'ADP':1, 'ADV':2, 'AUX':3, 'CCONJ':4, 'DET':5, 'INTJ':6, 'NOUN':7, 'NUM':8, 'PRON':9, 'PROPN':10, 'PUNCT':11, 'SCONJ':12, 'SYM':13, 'VERB':14, 'X':15} # derived from HTB and IAHLTWiki trainsets #TODO: add other UD tags?
-        self.sbd_tag2idx = {'B-SENT': 1,'O': 0,}
+        self.sbd_tag2idx = {'B-SENT': 1,'O': 0}
 
         self.sbdtagset = Dictionary()
         for key in self.sbd_tag2idx.keys():
@@ -104,10 +98,8 @@ class MTLModel(nn.Module):
         # Intermediate feedforward layer
         self.ffdim = ffdim
         if self.encodertype == 'transformer':
-            #self.fflayer = TimeDistributed(nn.Linear(in_features=self.embeddingdim, out_features=self.ffdim)).to(self.device)
             self.fflayer = nn.Linear(in_features=self.embeddingdim, out_features=self.ffdim).to(self.device)
         else:
-            #self.fflayer = TimeDistributed(nn.Linear(in_features=self.rnndim, out_features=self.ffdim)).to(self.device)
             self.fflayer = nn.Linear(in_features=self.rnndim, out_features=self.ffdim).to(self.device)
 
         # param init
@@ -119,7 +111,7 @@ class MTLModel(nn.Module):
 
         # Label space for the pos tagger
         # TODO: CRF?
-        #self.hidden2postag = TimeDistributed(nn.Linear(in_features=self.ffdim,out_features=len(self.postagset.keys()))).to(self.device)
+        #self.hidden2postag = nn.Linear(in_features=self.ffdim,out_features=len(self.postagset.keys())).to(self.device)
 
         # Label space for sent splitter
         self.hidden2sbd = nn.Linear(in_features=self.ffdim,out_features=len(self.sbdtagset)).to(self.device)
@@ -133,16 +125,12 @@ class MTLModel(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
-
         self.sbdcrf = CRF(self.sbdtagset,len(self.sbdtagset),init_from_state_dict=False) # TODO: parameterize
         self.viterbidecoder = ViterbiDecoder(self.sbdtagset)
 
 
     def forward(self,data):
 
-        """
-        slice is a list of tuples of length = seq_len. Each tuple is (token, pos tag, sentence boundary label)
-        """
         badrecords = []
         data = [d.split() for d in data] # for AlephBERT
         tokens = self.tokenizer(data,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already. Otherwise its own subword tokenization messes things up.
@@ -159,6 +147,7 @@ class MTLModel(nn.Module):
         for k in range(0,len(tokens.encodings)):
             emb = []
             maxindex = max([w for w in tokens.encodings[k].words if w])
+
             try:
                 assert maxindex == self.sequence_length - 1  # otherwise won't average correctly and align with labels
             except AssertionError:
@@ -189,7 +178,10 @@ class MTLModel(nn.Module):
             emb = torch.stack(emb)
             avgembeddings.append(emb)
 
-        avgembeddings = torch.stack(avgembeddings)
+        if len(avgembeddings) > 0:
+            avgembeddings = torch.stack(avgembeddings)
+        else:
+            return None,badrecords
 
         #print ('average embeddings')
         #print (time() - start)
@@ -212,7 +204,6 @@ class MTLModel(nn.Module):
         # logits for sbd
         sbdlogits = self.hidden2sbd(feats)
         sbdlogits = self.sbdcrf(sbdlogits)
-        #sbdlogits = sbdlogits.permute(1,0,2)
 
 
         del embeddings
@@ -224,7 +215,7 @@ class MTLModel(nn.Module):
         return sbdlogits,badrecords
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,learningrate = 0.00001):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,learningrate = 0.0001):
 
         self.mtlmodel = MTLModel(rnndim,rnnnumlayers,rnnbidirectional,rnndropout,encodertype,ffdim)
 
@@ -246,7 +237,6 @@ class Tagger():
             self.testdatafile = '../data/sentsplit_postag_test_gold.tab'
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        #self.device = 'cpu'
 
         self.trainflag = trainflag
         self.trainfile = trainfile
@@ -258,9 +248,6 @@ class Tagger():
         # Loss for pos tagging
         #self.postagloss = nn.CrossEntropyLoss()
         #self.postagloss.to(self.device)
-
-        #self.sbdloss = nn.CrossEntropyLoss(weight=torch.FloatTensor([1,5]))
-        #self.sbdloss.to(self.device)
 
         self.sbdloss = ViterbiLoss(self.mtlmodel.sbdtagset)
 
@@ -333,12 +320,15 @@ class Tagger():
 
         # get the loss
         sbdlogits,badrecords = self.mtlmodel(spans)
-        #predictions = torch.argmax(sbdlogits,dim=1)
 
         badrecords = sorted(badrecords,reverse=True)
         for record in badrecords:
             labelspans.pop(record)
+            spans.pop(record)
             self.mtlmodel.batch_size -= 1
+
+        if len(spans) == 0:
+            return None, None
 
         labelspans = [label for span in labelspans for label in span]
         labelspans = torch.LongTensor(labelspans).to(self.device)
@@ -363,18 +353,13 @@ class Tagger():
 
             labels.append(label)
 
-        #loss = self.sbdloss(sbdlogits,labelspans)
-
         del sbdlogits
         del labelspans
 
-        #gc.collect()
         torch.cuda.empty_cache()
 
-        #print (torch.cuda.memory_stats("cuda:0"))
-
-
         return labels,sbdloss.item()
+
 
     def train(self):
 
@@ -386,7 +371,6 @@ class Tagger():
                     lines = fi.readlines()
                     lines = list(reversed(lines))  # hebrew is right to left...
 
-                    # shingle it here to get more training data
                     for idx in range(0, len(lines), 128):
                         if idx + self.mtlmodel.sequence_length >= len(lines):
                             slice = lines[idx:len(lines)]
@@ -411,7 +395,7 @@ class Tagger():
 
             return dataset
 
-        epochs = 10000
+        epochs = 1000
 
         trainingdata = read_file()
         devdata = read_file(mode='dev')
@@ -421,7 +405,7 @@ class Tagger():
             self.mtlmodel.train()
             self.optimizer.zero_grad()
 
-            data = sample(trainingdata,self.mtlmodel.batch_size)
+            data = sample(trainingdata,SAMPLE_SIZE)
             data = [datum for datum in data if len(datum) == self.mtlmodel.sequence_length]
             self.mtlmodel.batch_size = len(data)
 
@@ -459,20 +443,6 @@ class Tagger():
 
                 with torch.no_grad():
 
-                    """
-                    old_batch_size = self.mtlmodel.batch_size
-                    data = [datum for datum in devdata if len(datum) == self.mtlmodel.sequence_length]
-                    self.mtlmodel.batch_size = len(data)
-
-                    sents = [' '.join([s.split('\t')[0].strip() for s in sls]) for sls in data]
-
-                    sbdtags = [[s.split('\t')[2].strip() for s in sls] for sls in data]
-                    sbdtags = [[self.mtlmodel.sbd_tag2idx[t] for t in tag] for tag in sbdtags]
-                    goldlabels = [t for tags in sbdtags for t in tags]
-                    sbdtags = torch.LongTensor(sbdtags).to(self.device)
-                    """
-
-
                     totaldevloss = 0
                     allpreds = []
                     allgold = []
@@ -483,20 +453,13 @@ class Tagger():
                         goldlabels = [self.mtlmodel.sbdtagset.get_idx_for_item(s) for s in goldlabels]
 
                         preds,devloss = self.shingle_predict(sents,goldlabels)
+                        if preds is None:
+                            preds = [self.mtlmodel.sbdtagset.get_idx_for_item("O")] * len(goldlabels)
+                            devloss = 0
+
                         totaldevloss += devloss
                         allpreds.extend(preds)
                         allgold.extend(goldlabels)
-
-
-
-                    """
-                    sbdlogits = self.mtlmodel(sents)
-                    devloss = self.sbdloss(sbdlogits,sbdtags)
-
-                    preds = torch.argmax(sbdlogits,dim=1)
-                    preds = preds.tolist()
-                    preds = [p for pred in preds for p in pred]
-                    """
 
                     f1 = f1_score(allgold,allpreds)
                     precision = precision_score(allgold,allpreds)
@@ -512,9 +475,6 @@ class Tagger():
                     print('dev precision:' + str(precision))
                     print('dev recall:' + str(recall))
                     print ('\n')
-
-                self.mtlmodel.train()
-                #self.mtlmodel.batch_size = old_batch_size
 
 
     def predict(self):
@@ -533,15 +493,13 @@ class Tagger():
 
             with open(filename,'w') as tr:
                 for sent in data:
-                    for i in range(0,len(sent)): # This will disregard the final punct in each sentence.
+                    for i in range(0,len(sent)):
+                        if isinstance(sent[i]['id'], tuple): continue # MWE conventions in the conllu file
 
-                        if isinstance(sent[i]['id'],tuple): continue
+                        if sent[i]['id'] == 1:
+                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'B-SENT' + '\n')
 
-                        if i == len(sent) - 2 and (sent[i + 1]['form'] == '.' and sent[i + 1]['upos'] == 'PUNCT'):
-                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'B-SENT' + '\n')
-                        elif i == len(sent) - 1 and (sent[i]['form'] != '.' and sent[i]['upos'] != 'PUNCT'):
-                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'B-SENT' + '\n')
-                        elif i != len(sent) - 1:
+                        else:
                             tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'O' + '\n')
 
         traindata = self.read_conllu()
