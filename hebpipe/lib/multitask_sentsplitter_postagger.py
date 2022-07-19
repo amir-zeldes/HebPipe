@@ -10,14 +10,48 @@ from flair.data import Sentence, Dictionary
 from transformers import BertModel,BertTokenizerFast
 from random import sample
 from collections import defaultdict
-from sklearn.metrics import f1_score, precision_score,recall_score
 from lib.crfutils.crf import CRF
 from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
 
 from time import time
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256,garbage_collection_threshold:0.2"
-SAMPLE_SIZE = 16
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
+SAMPLE_SIZE = 32
+
+
+def spans_score(gold_spans, system_spans):
+    correct, gi, si = 0, 0, 0
+    while gi < len(gold_spans) and si < len(system_spans):
+        if system_spans[si].start < gold_spans[gi].start:
+            si += 1
+        elif gold_spans[gi].start < system_spans[si].start:
+            gi += 1
+        else:
+            correct += gold_spans[gi].end == system_spans[si].end
+            si += 1
+            gi += 1
+
+    return Score(len(gold_spans), len(system_spans), correct)
+
+
+class Score:
+        def __init__(self, gold_total, system_total, correct, aligned_total=None):
+            self.correct = correct
+            self.gold_total = gold_total
+            self.system_total = system_total
+            self.aligned_total = aligned_total
+            self.precision = correct / system_total if system_total else 0.0
+            self.recall = correct / gold_total if gold_total else 0.0
+            self.f1 = 2 * correct / (system_total + gold_total) if system_total + gold_total else 0.0
+            self.aligned_accuracy = correct / aligned_total if aligned_total else aligned_total
+
+
+class UDSpan:
+    def __init__(self, start, end):
+        self.start = start
+        # Note that self.end marks the first position **after the end** of span,
+        # so we can use characters[start:end] or range(start, end).
+        self.end = end
 
 class PositionalEncoding(nn.Module):
 
@@ -40,7 +74,7 @@ class PositionalEncoding(nn.Module):
 
 
 class MTLModel(nn.Module):
-    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,batchsize=SAMPLE_SIZE,transformernumlayers=6,nhead=8,sequencelength=128):
+    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='gru',ffdim=512,batchsize=SAMPLE_SIZE,transformernumlayers=6,nhead=8,sequencelength=64):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -48,11 +82,13 @@ class MTLModel(nn.Module):
         self.postagset = {'ADJ':0, 'ADP':1, 'ADV':2, 'AUX':3, 'CCONJ':4, 'DET':5, 'INTJ':6, 'NOUN':7, 'NUM':8, 'PRON':9, 'PROPN':10, 'PUNCT':11, 'SCONJ':12, 'SYM':13, 'VERB':14, 'X':15} # derived from HTB and IAHLTWiki trainsets #TODO: add other UD tags?
         self.sbd_tag2idx = {'B-SENT': 1,'O': 0}
 
+        """
         self.sbdtagset = Dictionary()
         for key in self.sbd_tag2idx.keys():
             self.sbdtagset.add_item(key.strip())
         self.sbdtagset.add_item("<START>")
         self.sbdtagset.add_item("<STOP>")
+        """
 
         self.sequence_length = sequencelength
         self.batch_size = batchsize
@@ -114,7 +150,7 @@ class MTLModel(nn.Module):
         #self.hidden2postag = nn.Linear(in_features=self.ffdim,out_features=len(self.postagset.keys())).to(self.device)
 
         # Label space for sent splitter
-        self.hidden2sbd = nn.Linear(in_features=self.ffdim,out_features=len(self.sbdtagset)).to(self.device)
+        self.hidden2sbd = nn.Linear(in_features=self.ffdim,out_features=len(self.sbd_tag2idx.keys())).to(self.device)
 
         # param init
         for name, param in self.hidden2sbd.named_parameters():
@@ -125,8 +161,8 @@ class MTLModel(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
-        self.sbdcrf = CRF(self.sbdtagset,len(self.sbdtagset),init_from_state_dict=False) # TODO: parameterize
-        self.viterbidecoder = ViterbiDecoder(self.sbdtagset)
+        #self.sbdcrf = CRF(self.sbdtagset,len(self.sbdtagset),init_from_state_dict=False) # TODO: parameterize
+        #self.viterbidecoder = ViterbiDecoder(self.sbdtagset)
 
 
     def forward(self,data):
@@ -203,7 +239,8 @@ class MTLModel(nn.Module):
 
         # logits for sbd
         sbdlogits = self.hidden2sbd(feats)
-        sbdlogits = self.sbdcrf(sbdlogits)
+        sbdlogits = sbdlogits.permute(0,2,1)
+        #sbdlogits = self.sbdcrf(sbdlogits)
 
 
         del embeddings
@@ -215,7 +252,7 @@ class MTLModel(nn.Module):
         return sbdlogits,badrecords
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='lstm',ffdim=512,learningrate = 0.0001):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='gru',ffdim=512,learningrate = 0.001):
 
         self.mtlmodel = MTLModel(rnndim,rnnnumlayers,rnnbidirectional,rnndropout,encodertype,ffdim)
 
@@ -249,13 +286,15 @@ class Tagger():
         #self.postagloss = nn.CrossEntropyLoss()
         #self.postagloss.to(self.device)
 
-        self.sbdloss = ViterbiLoss(self.mtlmodel.sbdtagset)
+        #self.sbdloss = ViterbiLoss(self.mtlmodel.sbdtagset)
+        self.sbdloss = nn.CrossEntropyLoss(weight=torch.FloatTensor([1,3]))
+        self.sbdloss.to(self.device)
 
-        self.optimizer = torch.optim.Adam(list(self.mtlmodel.encoder.parameters()) +  list(self.mtlmodel.fflayer.parameters()) + list(self.mtlmodel.sbdcrf.parameters()) + list(self.mtlmodel.hidden2sbd.parameters()), lr=learningrate)
-        #self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[500,2500],gamma=0.01)
+        self.optimizer = torch.optim.AdamW(list(self.mtlmodel.encoder.parameters()) +  list(self.mtlmodel.fflayer.parameters()) +  list(self.mtlmodel.hidden2sbd.parameters()), lr=learningrate)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[150,750],gamma=0.1)
         self.evalstep = 20
 
-        self.stride_size = 10
+        self.stride_size = 20
 
         self.set_seed(42)
 
@@ -330,26 +369,29 @@ class Tagger():
         if len(spans) == 0:
             return None, None
 
-        labelspans = [label for span in labelspans for label in span]
+        #labelspans = [label for span in labelspans for label in span]
         labelspans = torch.LongTensor(labelspans).to(self.device)
 
-        lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
-        lengths = torch.LongTensor(lengths).to(self.device)
+        #lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
+        #lengths = torch.LongTensor(lengths).to(self.device)
 
-        score = (sbdlogits, lengths, self.mtlmodel.sbdcrf.transitions)
-        sbdloss = self.sbdloss(score, labelspans)
+        #score = (sbdlogits, lengths, self.mtlmodel.sbdcrf.transitions)
+        #sbdloss = self.sbdloss(score, labelspans)
+        sbdloss = self.sbdloss(sbdlogits,labelspans)
 
         # now get the predictions
-        sents = []
-        for span in spans:
-            sents.append(Sentence(span))
+        #sents = []
+        #for span in spans:
+        #    sents.append(Sentence(span))
 
-        predictions, _ = self.mtlmodel.viterbidecoder.decode(score,False,sents)
+        #predictions, _ = self.mtlmodel.viterbidecoder.decode(score,False,sents)
+        predictions = torch.argmax(sbdlogits,dim=1)
 
         labels = []
         for idx in final_mapping:
             snum, position = final_mapping[idx]
-            label = self.mtlmodel.sbdtagset.get_idx_for_item(predictions[snum][position][0])
+            #label = self.mtlmodel.sbdtagset.get_idx_for_item(predictions[snum][position][0])
+            label = predictions[snum][position]
 
             labels.append(label)
 
@@ -369,29 +411,33 @@ class Tagger():
             if mode == 'dev':
                 with open(self.devdatafile, 'r') as fi:
                     lines = fi.readlines()
-                    lines = list(reversed(lines))  # hebrew is right to left...
+                    #lines = list(reversed(lines))  # hebrew is right to left...
 
-                    for idx in range(0, len(lines), 128):
+                    for idx in range(0, len(lines), self.mtlmodel.sequence_length):
                         if idx + self.mtlmodel.sequence_length >= len(lines):
                             slice = lines[idx:len(lines)]
                         else:
                             slice = lines[idx: idx + self.mtlmodel.sequence_length]
 
                         dataset.append(slice)
+
+                test = [d for slice in dataset for d in slice]
+                assert len(test) == len(lines)
 
             else:
                 with open(self.trainingdatafile,'r') as fi:
                     lines = fi.readlines()
-                    lines = list(reversed(lines)) # hebrew is right to left...
+                    #lines = list(reversed(lines)) # hebrew is right to left...
 
                     # shingle it here to get more training data
-                    for idx in range(0,len(lines),self.stride_size):
+                    for idx in range(0,len(lines),self.mtlmodel.sequence_length - self.stride_size):
                         if idx + self.mtlmodel.sequence_length >= len(lines):
                             slice = lines[idx:len(lines)]
+                            dataset.append(slice)
+                            break
                         else:
                             slice = lines[idx: idx + self.mtlmodel.sequence_length]
-
-                        dataset.append(slice)
+                            dataset.append(slice)
 
             return dataset
 
@@ -419,19 +465,22 @@ class Tagger():
                 sbdtags.pop(record)
                 self.mtlmodel.batch_size -= 1
 
-            sbdtags = torch.tensor([self.mtlmodel.sbdtagset.get_idx_for_item(s) for sbd in sbdtags for s in sbd])
+            #sbdtags = torch.tensor([self.mtlmodel.sbdtagset.get_idx_for_item(s) for sbd in sbdtags for s in sbd])
+            sbdtags = torch.tensor([[self.mtlmodel.sbd_tag2idx[s] for s in sbd] for sbd in sbdtags]).to(self.device)
 
-            lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
-            lengths = torch.LongTensor(lengths).to(self.device)
-            scores = (sbdlogits,lengths,self.mtlmodel.sbdcrf.transitions)
 
-            sbdloss = self.sbdloss(scores,sbdtags)
+            #lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
+            #lengths = torch.LongTensor(lengths).to(self.device)
+            #scores = (sbdlogits,lengths,self.mtlmodel.sbdcrf.transitions)
+
+            #sbdloss = self.sbdloss(scores,sbdtags)
+            sbdloss = self.sbdloss(sbdlogits,sbdtags)
 
             #mtlloss = posloss + sbdloss # uniform weighting. # TODO: learnable weights?
             #mtlloss.backward()
             sbdloss.backward()
             self.optimizer.step()
-            #self.scheduler.step()
+            self.scheduler.step()
 
             #self.writer.add_scalar('train_pos_loss', posloss.item(), epoch)
             self.writer.add_scalar('train_sbd_loss', sbdloss.item(), epoch)
@@ -440,40 +489,59 @@ class Tagger():
             if epoch % self.evalstep == 0:
 
                 self.mtlmodel.eval()
-
+                start = time()
                 with torch.no_grad():
 
                     totaldevloss = 0
                     allpreds = []
                     allgold = []
+                    invalidlabelscount = 0
                     for slice in devdata:
 
                         sents = [s.split('\t')[0].strip() for s in slice]
                         goldlabels = [s.split('\t')[2].strip() for s in slice]
-                        goldlabels = [self.mtlmodel.sbdtagset.get_idx_for_item(s) for s in goldlabels]
+                        #goldlabels = [self.mtlmodel.sbdtagset.get_idx_for_item(s) for s in goldlabels]
+                        goldlabels = [self.mtlmodel.sbd_tag2idx[s] for s in goldlabels]
 
                         preds,devloss = self.shingle_predict(sents,goldlabels)
                         if preds is None:
-                            preds = [self.mtlmodel.sbdtagset.get_idx_for_item("O")] * len(goldlabels)
+                            preds = [self.mtlmodel.sbd_tag2idx["O"] for s in goldlabels] * len(goldlabels)
+                            invalidlabelscount += len(goldlabels)
                             devloss = 0
 
                         totaldevloss += devloss
                         allpreds.extend(preds)
                         allgold.extend(goldlabels)
 
-                    f1 = f1_score(allgold,allpreds)
-                    precision = precision_score(allgold,allpreds)
-                    recall = recall_score(allgold,allpreds)
+                    print ('dev inference')
+                    print (time() - start)
+
+                    goldspans = []
+                    predspans = []
+                    goldstartindex = 0
+                    predstartindex = 0
+                    for i in range(0,len(allgold)):
+                        if allgold[i] == 1: #B-SENT
+                            goldspans.append(UDSpan(goldstartindex,i))
+                            goldstartindex = i
+                        if allpreds[i] == 1:
+                            predspans.append(UDSpan(predstartindex,i))
+                            predstartindex = i
+
+
+                    scores = spans_score(goldspans,predspans)
+
+                    print ('invalid labels:' + str(invalidlabelscount))
 
                     self.writer.add_scalar("dev_loss",round(totaldevloss/len(devdata),2),int(epoch / self.evalstep))
-                    self.writer.add_scalar("dev_f1", round(f1,2), int(epoch / self.evalstep))
-                    self.writer.add_scalar("dev_precision", round(precision, 2), int(epoch / self.evalstep))
-                    self.writer.add_scalar("dev_recall", round(recall, 2), int(epoch / self.evalstep))
+                    self.writer.add_scalar("dev_f1", round(scores.f1,2), int(epoch / self.evalstep))
+                    self.writer.add_scalar("dev_precision", round(scores.precision, 2), int(epoch / self.evalstep))
+                    self.writer.add_scalar("dev_recall", round(scores.recall, 2), int(epoch / self.evalstep))
 
 
-                    print ('dev f1:' + str(f1))
-                    print('dev precision:' + str(precision))
-                    print('dev recall:' + str(recall))
+                    print ('dev f1:' + str(scores.f1))
+                    print('dev precision:' + str(scores.precision))
+                    print('dev recall:' + str(scores.recall))
                     print ('\n')
 
 
