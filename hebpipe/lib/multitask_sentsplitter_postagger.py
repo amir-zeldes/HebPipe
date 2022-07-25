@@ -16,7 +16,7 @@ from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
 from time import time
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
-SAMPLE_SIZE = 32
+SAMPLE_SIZE = 16
 
 
 def spans_score(gold_spans, system_spans):
@@ -74,53 +74,60 @@ class PositionalEncoding(nn.Module):
 
 
 class MTLModel(nn.Module):
-    def __init__(self,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='gru',ffdim=512,batchsize=SAMPLE_SIZE,transformernumlayers=6,nhead=8,sequencelength=64):
+    def __init__(self,sbdrnndim=512,posrnndim=512,sbdrnnnumlayers=2,posrnnnumlayers=2,sbdrnnbidirectional=True,posrnnbidirectional=True,sbdrnndropout=0.3,posrnndropout=0.3,sbdencodertype='lstm',posencodertype='lstm',sbdffdim=512,posffdim=512,batchsize=SAMPLE_SIZE,sbdtransformernumlayers=6,sbdnhead=8,sequencelength=128):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+        # tagsets - amend labels here
         self.postagset = {'ADJ':0, 'ADP':1, 'ADV':2, 'AUX':3, 'CCONJ':4, 'DET':5, 'INTJ':6, 'NOUN':7, 'NUM':8, 'PRON':9, 'PROPN':10, 'PUNCT':11, 'SCONJ':12, 'SYM':13, 'VERB':14, 'X':15} # derived from HTB and IAHLTWiki trainsets #TODO: add other UD tags?
         self.sbd_tag2idx = {'B-SENT': 1,'O': 0}
 
-        """
-        self.sbdtagset = Dictionary()
-        for key in self.sbd_tag2idx.keys():
-            self.sbdtagset.add_item(key.strip())
-        self.sbdtagset.add_item("<START>")
-        self.sbdtagset.add_item("<STOP>")
-        """
+        # POS tagset in Dictionary object for Flair CRF
+        self.postagsetcrf = Dictionary()
+        for key in self.postagset.keys():
+            self.postagsetcrf.add_item(key.strip())
+        self.postagsetcrf.add_item("<START>")
+        self.postagsetcrf.add_item("<STOP>")
 
+        # shared hyper-parameters
         self.sequence_length = sequencelength
         self.batch_size = batchsize
-        self.encodertype = encodertype
 
+        # Embedding parameters and model
         self.tokenizer = BertTokenizerFast.from_pretrained('onlplab/alephbert-base')
         self.model = BertModel.from_pretrained('onlplab/alephbert-base').to(self.device)
+        self.embeddingdim = 768
 
-        # Bi-LSTM Encoder
-        self.embeddingdim = 768 * 1 # based on BERT model with Flair layers
-        self.rnndim = rnndim
-        self.rnnnumlayers = rnnnumlayers
-        self.rnnbidirectional = rnnbidirectional
-        self.rnndropout = rnndropout
+        # Bi-LSTM Encoder for SBD
+        self.sbdrnndim = sbdrnndim
+        self.sbdrnnnumlayers = sbdrnnnumlayers
+        self.sbdrnnbidirectional = sbdrnnbidirectional
+        self.sbdrnndropout = sbdrnndropout
 
-        if encodertype == 'lstm':
-            self.encoder = nn.LSTM(input_size=self.embeddingdim, hidden_size=self.rnndim // 2,
-                                 num_layers=self.rnnnumlayers, bidirectional=self.rnnbidirectional,
-                                 dropout=self.rnndropout,batch_first=True).to(self.device)
-        elif encodertype == 'gru':
-            self.encoder = nn.GRU(input_size=self.embeddingdim, hidden_size=self.rnndim // 2,
-                                   num_layers=self.rnnnumlayers, bidirectional=self.rnnbidirectional,
-                                   dropout=self.rnndropout,batch_first=True).to(self.device)
-        elif self.encodertype == 'transformer':
-            self.transformernumlayers = transformernumlayers
-            self.nhead = nhead
-            self.encoderlayer = nn.TransformerEncoderLayer(d_model= self.embeddingdim,nhead=nhead).to(self.device)
-            self.encoder = nn.TransformerEncoder(self.encoderlayer,num_layers=self.transformernumlayers).to(self.device)
-            self.posencoder = PositionalEncoding(d_model=self.embeddingdim).to(self.device)
+        #Bi-LSTM Encoder for POS tagging
+        self.posrnndim = posrnndim
+        self.posrnnnumlayers = posrnnnumlayers
+        self.posrnnbidirectional = posrnnbidirectional
+        self.posrnndropout = posrnndropout
+
+        if sbdencodertype == 'lstm':
+            self.sbdencoder = nn.LSTM(input_size=self.embeddingdim, hidden_size=self.sbdrnndim // 2,
+                                 num_layers=self.sbdrnnnumlayers, bidirectional=self.sbdrnnbidirectional,
+                                 dropout=self.sbdrnndropout,batch_first=True).to(self.device)
+        elif sbdencodertype == 'gru':
+            self.sbdencoder = nn.GRU(input_size=self.embeddingdim, hidden_size=self.sbdrnndim // 2,
+                                   num_layers=self.sbdrnnnumlayers, bidirectional=self.sbdrnnbidirectional,
+                                   dropout=self.sbdrnndropout,batch_first=True).to(self.device)
+        elif sbdencodertype == 'transformer':
+            self.sbdtransformernumlayers = sbdtransformernumlayers
+            self.sbdnhead = sbdnhead
+            self.sbdencoderlayer = nn.TransformerEncoderLayer(d_model= self.embeddingdim,nhead=self.sbdnhead).to(self.device)
+            self.sbdencoder = nn.TransformerEncoder(self.sbdencoderlayer,num_layers=self.sbdtransformernumlayers).to(self.device)
+            self.sbdposencoder = PositionalEncoding(d_model=self.embeddingdim).to(self.device)
 
         # param init
-        for name, param in self.encoder.named_parameters():
+        for name, param in self.sbdencoder.named_parameters():
             try:
                 if 'bias' in name:
                     nn.init.constant_(param,0.0)
@@ -129,28 +136,62 @@ class MTLModel(nn.Module):
             except ValueError as ex:
                 nn.init.constant_(param,0.0)
 
+        if posencodertype == 'lstm':
+            self.posencoder = nn.LSTM(input_size=self.embeddingdim, hidden_size=self.posrnndim // 2,
+                                 num_layers=self.posrnnnumlayers, bidirectional=self.posrnnbidirectional,
+                                 dropout=self.posrnndropout,batch_first=True).to(self.device)
+        elif posencodertype == 'gru':
+            self.posencoder = nn.GRU(input_size=self.embeddingdim, hidden_size=self.posrnndim // 2,
+                                   num_layers=self.posrnnnumlayers, bidirectional=self.posrnnbidirectional,
+                                   dropout=self.posrnndropout,batch_first=True).to(self.device)
+
+        # param init
+        for name, param in self.posencoder.named_parameters():
+            try:
+                if 'bias' in name:
+                    nn.init.constant_(param, 0.0)
+                elif 'weight' in name:
+                    nn.init.xavier_uniform_(param)
+            except ValueError as ex:
+                nn.init.constant_(param, 0.0)
+
         self.relu = nn.ReLU()
 
         # Intermediate feedforward layer
-        self.ffdim = ffdim
-        if self.encodertype == 'transformer':
-            self.fflayer = nn.Linear(in_features=self.embeddingdim, out_features=self.ffdim).to(self.device)
+        self.sbdffdim = sbdffdim
+        if sbdencodertype == 'transformer':
+            self.sbdfflayer = nn.Linear(in_features=self.embeddingdim, out_features=self.sbdffdim).to(self.device)
         else:
-            self.fflayer = nn.Linear(in_features=self.rnndim, out_features=self.ffdim).to(self.device)
+            self.sbdfflayer = nn.Linear(in_features=self.sbdrnndim, out_features=self.sbdffdim).to(self.device)
 
         # param init
-        for name, param in self.fflayer.named_parameters():
+        for name, param in self.sbdfflayer.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal_(param)
+
+        # Intermediate feedforward layer
+        self.posffdim = posffdim
+        self.posfflayer = nn.Linear(in_features=self.posrnndim, out_features=self.posffdim).to(self.device)
+
+        # param init
+        for name, param in self.posfflayer.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
             elif 'weight' in name:
                 nn.init.xavier_normal_(param)
 
         # Label space for the pos tagger
-        # TODO: CRF?
-        #self.hidden2postag = nn.Linear(in_features=self.ffdim,out_features=len(self.postagset.keys())).to(self.device)
+        self.hidden2postag = nn.Linear(in_features=self.posffdim,out_features=len(self.postagset.keys())).to(self.device)
+        for name, param in self.hidden2postag.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal_(param)
 
         # Label space for sent splitter
-        self.hidden2sbd = nn.Linear(in_features=self.ffdim,out_features=len(self.sbd_tag2idx.keys())).to(self.device)
+        self.hidden2sbd = nn.Linear(in_features=self.sbdffdim,out_features=len(self.sbd_tag2idx.keys())).to(self.device)
 
         # param init
         for name, param in self.hidden2sbd.named_parameters():
@@ -160,16 +201,83 @@ class MTLModel(nn.Module):
                 nn.init.xavier_normal_(param)
 
         self.sigmoid = nn.Sigmoid()
+        self.dropout = nn.Dropout(p=0.5)
+        self.embeddingdropout = nn.Dropout(p=0.1)
 
-        #self.sbdcrf = CRF(self.sbdtagset,len(self.sbdtagset),init_from_state_dict=False) # TODO: parameterize
-        #self.viterbidecoder = ViterbiDecoder(self.sbdtagset)
+        self.poscrf = CRF(self.postagsetcrf,len(self.postagsetcrf),init_from_state_dict=False) # TODO: parameterize
+        self.viterbidecoder = ViterbiDecoder(self.postagsetcrf)
 
+        self.stride_size = 10
+        self.sbdencodertype = sbdencodertype
 
-    def forward(self,data):
+    def shingle(self,toks,labels=None):
+        """
+        Returns the span embeddings, labelspans, and 'final mapping'
+        """
+        spans = []
+        labelspans = []
+        final_mapping = {}
 
-        badrecords = []
-        data = [d.split() for d in data] # for AlephBERT
-        tokens = self.tokenizer(data,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already. Otherwise its own subword tokenization messes things up.
+        # Hack tokens up into overlapping shingles
+        #wraparound = toks[-self.stride_size:] + toks + toks[: self.mtlmodel.sequence_length]
+        wraparound = torch.cat((toks[-self.stride_size:],toks,toks[: self.sequence_length]),dim=0)
+        if labels:
+            labelwraparound = labels[-self.stride_size:] + labels + labels[: self.sequence_length]
+        idx = 0
+        mapping = defaultdict(set)
+        snum = 0
+        while idx < len(toks):
+            if idx + self.sequence_length < len(wraparound):
+                span = wraparound[idx: idx + self.sequence_length]
+                if labels:
+                    labelspan = labelwraparound[idx: idx + self.sequence_length]
+            else:
+                span = wraparound[idx:]
+                if labels:
+                    labelspan = labelwraparound[idx:]
+
+            spans.append(span)
+            if labels:
+                labelspans.append(labelspan)
+
+            for i in range(idx - self.stride_size, idx + self.sequence_length - self.stride_size):
+                # start, end, snum
+                if i >= 0 and i < len(toks):
+                    mapping[i].add(
+                        (idx - self.stride_size, idx + self.sequence_length - self.stride_size, snum))
+            idx += self.stride_size
+            snum += 1
+
+        for idx in mapping:
+            best = self.sequence_length
+            for m in mapping[idx]:
+                start, end, snum = m
+                dist_to_end = end - idx
+                dist_to_start = idx - start
+                delta = abs(dist_to_end - dist_to_start)
+                if delta < best:
+                    best = delta
+                    final_mapping[idx] = (snum, idx - start)  # Get sentence number and position in sentence
+
+        spans = torch.stack(spans)
+        return spans,labelspans,final_mapping
+
+    def forward(self,data,mode='train'):
+
+        badrecords = [] # stores records where AlephBERT's tokenization messed up the sentence's sequence length, and removes these sentences from the batch.
+
+        if mode == 'train': # training is on a batch, so 3D tensor
+            sentences = [' '.join([s.split('\t')[0].strip() for s in sls]) for sls in data]
+            sbdlabels = [[self.sbd_tag2idx[s.split('\t')[2].strip()] for s in sls] for sls in data]
+        elif mode == 'dev': # inference is on a single record, 2D tensor
+            sentences = [' '.join([s.split('\t')[0].strip() for s in data])]
+            sbdlabels = [s.split('\t')[2].strip() for s in data]
+        else: # test - has no labels, and 2D tensor single record
+            sentences = [s.split('\t')[0].strip() for s in data]
+            sbdlabels = None
+
+        sentences = [d.split() for d in sentences] # for AlephBERT
+        tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already. Otherwise its own subword tokenization messes things up.
 
         embeddings = self.model(**tokens)
         embeddings = embeddings[0]
@@ -202,8 +310,6 @@ class MTLModel(nn.Module):
                     slice = embeddings[k][indices[0]:indices[-1] + 1]
                     slice = torch.mean(input=slice,dim=0,keepdim=False)
                     emb.append(slice)
-
-
             try:
                 assert len(emb) == self.sequence_length # averaging was correct and aligns with the labels
             except AssertionError:
@@ -214,47 +320,65 @@ class MTLModel(nn.Module):
             emb = torch.stack(emb)
             avgembeddings.append(emb)
 
+        badrecords = sorted(badrecords,reverse=True)
+
         if len(avgembeddings) > 0:
             avgembeddings = torch.stack(avgembeddings)
+            for record in badrecords:
+                sbdlabels.pop(record)
         else:
-            return None,badrecords
+            return None,None,None
 
         #print ('average embeddings')
         #print (time() - start)
 
-        if self.encodertype in ('lstm','gru'):
-            feats, _ = self.encoder(avgembeddings)
+        if mode != 'train':
+            # squeeze the embedding, as it's a single sentence
+            avgembeddings = torch.squeeze(avgembeddings)
+            finalembeddings,finallabels,finalmapping = self.shingle(avgembeddings,sbdlabels)
+            if mode != 'test':
+                finallabels = [[self.sbd_tag2idx[s] for s in sls] for sls in finallabels]
         else:
-            feats = self.posencoder(avgembeddings)
-            feats = self.encoder(feats)
+            finalembeddings = avgembeddings
+            finallabels = sbdlabels
+            finalmapping = None
 
+        finalembeddings = self.embeddingdropout(finalembeddings)
+
+        # SBD encoder and labels
+        if self.sbdencodertype in ('lstm','gru'):
+            feats, _ = self.sbdencoder(finalembeddings)
+        else:
+            feats = self.sbdposencoder(finalembeddings)
+            feats = self.sbdencoder(feats)
 
         # Intermediate Feedforward layer
-        feats = self.fflayer(feats)
+        feats = self.sbdfflayer(feats)
         feats = self.relu(feats)
+        feats = self.dropout(feats)
+
+        # logits for sbd
+        sbdlogits = self.hidden2sbd(feats)
+
+        #sbdlogits = sbdlogits.permute(0, 2, 1)
 
         # logits for pos
         #poslogits = self.hidden2postag(feats)
         #poslogits = poslogits.permute(0,2,1)
 
-        # logits for sbd
-        sbdlogits = self.hidden2sbd(feats)
-        sbdlogits = sbdlogits.permute(0,2,1)
-        #sbdlogits = self.sbdcrf(sbdlogits)
-
-
         del embeddings
+        del finalembeddings
         del avgembeddings
         del feats
 
         torch.cuda.empty_cache()
 
-        return sbdlogits,badrecords
+        return sbdlogits,finallabels,finalmapping # returns the logits
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,rnndim=512,rnnnumlayers=2,rnnbidirectional=True,rnndropout=0.3,encodertype='gru',ffdim=512,learningrate = 0.001):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=512,sbdrnnnumlayers=2,sbdrnnbidirectional=True,sbdrnndropout=0.3,sbdencodertype='lstm',sbdffdim=512,learningrate = 0.001):
 
-        self.mtlmodel = MTLModel(rnndim,rnnnumlayers,rnnbidirectional,rnndropout,encodertype,ffdim)
+        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdrnndropout=sbdrnndropout,sbdencodertype=sbdencodertype,sbdffdim=sbdffdim)
 
         if trainflag == True:
 
@@ -283,18 +407,17 @@ class Tagger():
         self.learningrate = learningrate
 
         # Loss for pos tagging
-        #self.postagloss = nn.CrossEntropyLoss()
-        #self.postagloss.to(self.device)
+        self.postagloss = ViterbiLoss(self.mtlmodel.postagsetcrf)
+        self.postagloss.to(self.device)
 
-        #self.sbdloss = ViterbiLoss(self.mtlmodel.sbdtagset)
+        # Loss for sentence splitting
         self.sbdloss = nn.CrossEntropyLoss(weight=torch.FloatTensor([1,3]))
         self.sbdloss.to(self.device)
 
-        self.optimizer = torch.optim.AdamW(list(self.mtlmodel.encoder.parameters()) +  list(self.mtlmodel.fflayer.parameters()) +  list(self.mtlmodel.hidden2sbd.parameters()), lr=learningrate)
-        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[150,750],gamma=0.1)
+        self.optimizer = torch.optim.AdamW(list(self.mtlmodel.sbdencoder.parameters()) +  list(self.mtlmodel.sbdfflayer.parameters()) +
+                                           list(self.mtlmodel.hidden2sbd.parameters()), lr=learningrate)
+        #self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[150,400],gamma=0.1)
         self.evalstep = 20
-
-        self.stride_size = 20
 
         self.set_seed(42)
 
@@ -302,106 +425,6 @@ class Tagger():
 
         random.seed(seed)
         torch.manual_seed(seed)
-
-
-    def shingle_predict(self,toks,labels=None,type='sbd'):
-
-        """
-        Shingles data, then predicts the tag. Applies to dev and test sets only
-        pass labels if they exist e.g for dev / test  Otherwise it's inference on new data.
-        pass type for the type of label, sbd or pos
-        """
-
-        spans = []
-        if labels:
-            labelspans = []
-        final_mapping = {}
-        # Hack tokens up into overlapping shingles
-        wraparound = toks[-self.stride_size:] + toks + toks[: self.mtlmodel.sequence_length]
-        if labels:
-            labelwraparound = labels[-self.stride_size:] + labels + labels[: self.mtlmodel.sequence_length]
-        idx = 0
-        mapping = defaultdict(set)
-        snum = 0
-        while idx < len(toks):
-            if idx + self.mtlmodel.sequence_length < len(wraparound):
-                span = wraparound[idx: idx + self.mtlmodel.sequence_length]
-                if labels:
-                    labelspan = labelwraparound[idx: idx + self.mtlmodel.sequence_length]
-            else:
-                span = wraparound[idx:]
-                if labels:
-                    labelspan = labelwraparound[idx:]
-            sent = " ".join(span)
-            spans.append(sent)
-            if labels:
-                labelspans.append(labelspan)
-
-            for i in range(idx - self.stride_size, idx + self.mtlmodel.sequence_length - self.stride_size):
-                # start, end, snum
-                if i >= 0 and i < len(toks):
-                    mapping[i].add((idx - self.stride_size, idx + self.mtlmodel.sequence_length - self.stride_size, snum))
-            idx += self.stride_size
-            snum += 1
-
-        for idx in mapping:
-            best = self.mtlmodel.sequence_length
-            for m in mapping[idx]:
-                start, end, snum = m
-                dist_to_end = end - idx
-                dist_to_start = idx - start
-                delta = abs(dist_to_end - dist_to_start)
-                if delta < best:
-                    best = delta
-                    final_mapping[idx] = (snum, idx - start)  # Get sentence number and position in sentence
-
-        self.mtlmodel.batch_size = len(spans)
-
-        # get the loss
-        sbdlogits,badrecords = self.mtlmodel(spans)
-
-        badrecords = sorted(badrecords,reverse=True)
-        for record in badrecords:
-            labelspans.pop(record)
-            spans.pop(record)
-            self.mtlmodel.batch_size -= 1
-
-        if len(spans) == 0:
-            return None, None
-
-        #labelspans = [label for span in labelspans for label in span]
-        labelspans = torch.LongTensor(labelspans).to(self.device)
-
-        #lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
-        #lengths = torch.LongTensor(lengths).to(self.device)
-
-        #score = (sbdlogits, lengths, self.mtlmodel.sbdcrf.transitions)
-        #sbdloss = self.sbdloss(score, labelspans)
-        sbdloss = self.sbdloss(sbdlogits,labelspans)
-
-        # now get the predictions
-        #sents = []
-        #for span in spans:
-        #    sents.append(Sentence(span))
-
-        #predictions, _ = self.mtlmodel.viterbidecoder.decode(score,False,sents)
-        predictions = torch.argmax(sbdlogits,dim=1)
-
-        labels = []
-        for idx in final_mapping:
-            snum, position = final_mapping[idx]
-            #label = self.mtlmodel.sbdtagset.get_idx_for_item(predictions[snum][position][0])
-            label = predictions[snum][position]
-
-            labels.append(label)
-
-        del sbdlogits
-        del labelspans
-
-        torch.cuda.empty_cache()
-
-        return labels,sbdloss.item()
-
 
     def train(self):
 
@@ -430,7 +453,7 @@ class Tagger():
                     #lines = list(reversed(lines)) # hebrew is right to left...
 
                     # shingle it here to get more training data
-                    for idx in range(0,len(lines),self.mtlmodel.sequence_length - self.stride_size):
+                    for idx in range(0,len(lines),self.mtlmodel.sequence_length - self.mtlmodel.stride_size):
                         if idx + self.mtlmodel.sequence_length >= len(lines):
                             slice = lines[idx:len(lines)]
                             dataset.append(slice)
@@ -441,7 +464,7 @@ class Tagger():
 
             return dataset
 
-        epochs = 1000
+        epochs = 1500
 
         trainingdata = read_file()
         devdata = read_file(mode='dev')
@@ -455,32 +478,24 @@ class Tagger():
             data = [datum for datum in data if len(datum) == self.mtlmodel.sequence_length]
             self.mtlmodel.batch_size = len(data)
 
-            sents = [' '.join([s.split('\t')[0].strip() for s in sls]) for sls in data]
+            sbdlogits, sbdlabels, badrecords = self.mtlmodel(data)
+            sbdtags = torch.LongTensor(sbdlabels).to(self.device)
 
-            sbdlogits, badrecords = self.mtlmodel(sents)
-            badrecords = sorted(badrecords, reverse=True)
+            lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
+            lengths = torch.LongTensor(lengths).to(self.device)
 
-            sbdtags = [[s.split('\t')[2].strip() for s in sls] for sls in data]
-            for record in badrecords:
-                sbdtags.pop(record)
-                self.mtlmodel.batch_size -= 1
+            #scores = (poslogits,lengths,self.mtlmodel.poscrf.transitions)
+            #sbdloss = self.sbdloss
 
-            #sbdtags = torch.tensor([self.mtlmodel.sbdtagset.get_idx_for_item(s) for sbd in sbdtags for s in sbd])
-            sbdtags = torch.tensor([[self.mtlmodel.sbd_tag2idx[s] for s in sbd] for sbd in sbdtags]).to(self.device)
-
-
-            #lengths = [self.mtlmodel.sequence_length] * self.mtlmodel.batch_size
-            #lengths = torch.LongTensor(lengths).to(self.device)
-            #scores = (sbdlogits,lengths,self.mtlmodel.sbdcrf.transitions)
-
-            #sbdloss = self.sbdloss(scores,sbdtags)
+            sbdlogits = sbdlogits.permute(0,2,1)
             sbdloss = self.sbdloss(sbdlogits,sbdtags)
+            #posloss = self.postagloss(scores,postags)
 
             #mtlloss = posloss + sbdloss # uniform weighting. # TODO: learnable weights?
             #mtlloss.backward()
             sbdloss.backward()
             self.optimizer.step()
-            self.scheduler.step()
+            #self.scheduler.step()
 
             #self.writer.add_scalar('train_pos_loss', posloss.item(), epoch)
             self.writer.add_scalar('train_sbd_loss', sbdloss.item(), epoch)
@@ -489,23 +504,38 @@ class Tagger():
             if epoch % self.evalstep == 0:
 
                 self.mtlmodel.eval()
-                start = time()
+                #start = time()
                 with torch.no_grad():
 
                     totaldevloss = 0
                     allpreds = []
                     allgold = []
                     invalidlabelscount = 0
+
                     for slice in devdata:
 
-                        sents = [s.split('\t')[0].strip() for s in slice]
+                        preds = []
+
                         goldlabels = [s.split('\t')[2].strip() for s in slice]
-                        #goldlabels = [self.mtlmodel.sbdtagset.get_idx_for_item(s) for s in goldlabels]
                         goldlabels = [self.mtlmodel.sbd_tag2idx[s] for s in goldlabels]
 
-                        preds,devloss = self.shingle_predict(sents,goldlabels)
-                        if preds is None:
-                            preds = [self.mtlmodel.sbd_tag2idx["O"] for s in goldlabels] * len(goldlabels)
+                        sbdlogits, sbdlabels, finalmapping = self.mtlmodel(slice,mode='dev')
+
+                        if sbdlabels is not None:
+                            # get the predictions - on non-shingled data
+                            for idx in finalmapping:
+                                snum, position = finalmapping[idx]
+                                label = torch.argmax(sbdlogits[snum][position]).item()
+
+                                preds.append(label)
+
+                            # get the loss - on 'shingled' data
+                            sbdlogits = sbdlogits.permute(0,2,1)
+                            sbdtags = torch.LongTensor(sbdlabels).to(self.device)
+                            devloss = self.sbdloss(sbdlogits, sbdtags).item()
+
+                        else:
+                            preds = [self.mtlmodel.sbd_tag2idx["O"] for _ in goldlabels]
                             invalidlabelscount += len(goldlabels)
                             devloss = 0
 
@@ -513,8 +543,8 @@ class Tagger():
                         allpreds.extend(preds)
                         allgold.extend(goldlabels)
 
-                    print ('dev inference')
-                    print (time() - start)
+                    #print ('dev inference')
+                    #print (time() - start)
 
                     goldspans = []
                     predspans = []
