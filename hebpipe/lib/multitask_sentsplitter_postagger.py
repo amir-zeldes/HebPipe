@@ -13,12 +13,10 @@ from collections import defaultdict
 from lib.crfutils.crf import CRF
 from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
 
-
 from time import time
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 SAMPLE_SIZE = 16
-
 
 def spans_score(gold_spans, system_spans):
     correct, gi, si = 0, 0, 0
@@ -271,24 +269,25 @@ class MTLModel(nn.Module):
 
     def forward(self,data,mode='train'):
 
-        badrecords = [] # stores records where AlephBERT's tokenization messed up the sentence's sequence length, and removes these sentences from the batch.
+        badrecords = [] # stores records where AlephBERT's tokenization 'messed up' the sentence's sequence length, and removes these sentences from the batch.
 
+        # Extract the sentences and labels
         if mode == 'train': # training is on a batch, so 3D tensor
             sentences = [' '.join([s.split('\t')[0].strip() for s in sls]) for sls in data]
             sbdlabels = [[self.sbd_tag2idx[s.split('\t')[2].strip()] for s in sls] for sls in data]
             poslabels = [[self.postagsetcrf.get_idx_for_item(s.split('\t')[1].strip()) for s in sls] for sls in data]
         elif mode == 'dev': # inference is on a single record
             sentences = [' '.join([s.split('\t')[0].strip() for s in data])]
-            sbdlabels = [s.split('\t')[2].strip() for s in data]
+            sbdlabels = [self.sbd_tag2idx[s.split('\t')[2].strip()] for s in data]
             poslabels = [self.postagsetcrf.get_idx_for_item(s.split('\t')[1].strip()) for s in data]
         else: # test - has no labels, and 2D tensor single record
             sentences = [' '.join([s.split('\t')[0].strip() for s in data])]
             sbdlabels = None
             poslabels = None
 
+        # Make embeddings
         sentences = [d.split() for d in sentences] # for AlephBERT
-        tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already. Otherwise its own subword tokenization messes things up.
-
+        tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already.
         embeddings = self.model(**tokens)
         embeddings = embeddings[0]
 
@@ -296,7 +295,7 @@ class MTLModel(nn.Module):
         Average the subword embeddings
         This process will drop the [CLS],[SEP] and [PAD] tokens
         """
-        #start = time()
+
         avgembeddings = []
         for k in range(0,len(tokens.encodings)):
             emb = []
@@ -305,7 +304,7 @@ class MTLModel(nn.Module):
             try:
                 assert maxindex == self.sequence_length - 1  # otherwise won't average correctly and align with labels
             except AssertionError:
-                print ('max index not equal sequence len. Skipping.')
+                print ('max index not equal sequence len. Default labels will be applied.')
                 badrecords.append(k)
                 continue
 
@@ -323,7 +322,7 @@ class MTLModel(nn.Module):
             try:
                 assert len(emb) == self.sequence_length # averaging was correct and aligns with the labels
             except AssertionError:
-                print ('embedding not built correctly. Skipping')
+                print ('embedding not built correctly. Default labels will be applied')
                 badrecords.append(k)
                 continue
 
@@ -332,63 +331,65 @@ class MTLModel(nn.Module):
 
         badrecords = sorted(badrecords,reverse=True)
 
-        if len(avgembeddings) > 0:
-            avgembeddings = torch.stack(avgembeddings)
-            for record in badrecords:
-                sbdlabels.pop(record)
-                poslabels.pop(record)
-                self.batch_size -= 1
-        else:
-            return None,None,None,None,None
-
-        #print ('average embeddings')
-        #print (time() - start)
+        avgembeddings = torch.stack(avgembeddings)
+        for record in badrecords:
+            sbdlabels.pop(record)
+            poslabels.pop(record)
+            self.batch_size -= 1
 
         if mode != 'train':
             # squeeze the embedding, as it's a single sentence
             avgembeddings = torch.squeeze(avgembeddings)
-            finalembeddings,finalsbdlabels,finalmapping = self.shingle(avgembeddings,sbdlabels)
+            # shingle the sentence embedding and its label, to calculate the dev loss later
+            sbdembeddings,finalsbdlabels,finalmapping = self.shingle(avgembeddings,sbdlabels)
+            # restore dimensionality for the POS tagging pipeline.
             avgembeddings = torch.unsqueeze(avgembeddings,dim=0)
-            if mode != 'test':
-                finalsbdlabels = [[self.sbd_tag2idx[s] for s in sls] for sls in finalsbdlabels]
+
         else:
-            finalembeddings = avgembeddings
+            sbdembeddings = avgembeddings
             finalsbdlabels = sbdlabels
             finalmapping = None
 
-        finalembeddings = self.embeddingdropout(finalembeddings)
+        sbdembeddings = self.embeddingdropout(sbdembeddings)
 
         # SBD encoder and labels
         if self.sbdencodertype in ('lstm','gru'):
-            feats, _ = self.sbdencoder(finalembeddings)
+            feats, _ = self.sbdencoder(sbdembeddings)
         else:
-            feats = self.sbdposencoder(finalembeddings)
+            feats = self.sbdposencoder(sbdembeddings)
             feats = self.sbdencoder(feats)
 
-        # Intermediate Feedforward layer
+        # SBD Intermediate Feedforward layer
         feats = self.sbdfflayer(feats)
         feats = self.relu(feats)
         feats = self.dropout(feats)
 
-        # logits for sbd
+        # SBD logits
         sbdlogits = self.hidden2sbd(feats)
 
         #get the sbd predictions as input to the POS encoder
         if mode == 'train':
             sbdpreds = torch.argmax(sbdlogits,dim=2,keepdim=True)
         else:
+            # Predict from the shingles for SBD.
+            # 'Believe the span where the token is most in the middle'
             sbdpreds = []
             for idx in finalmapping:
                 snum, position = finalmapping[idx]
                 label = torch.argmax(sbdlogits[snum][position]).item()
                 sbdpreds.append(label)
+
+            # Unsqueeze for input to the POS Encoder
             sbdpreds = torch.LongTensor(sbdpreds)
             sbdpreds = torch.unsqueeze(sbdpreds,dim=0)
             sbdpreds = torch.unsqueeze(sbdpreds, dim=2)
             sbdpreds = sbdpreds.to(self.device)
 
+        # Add the SBD predictions to the POS Encoder Input!
         posembeddings = torch.cat((avgembeddings,sbdpreds),dim=2)
+
         if mode in ('dev','test'):
+            # Squeeze these to return to the Trainer for scores, now that we are done with them
             sbdpreds = torch.squeeze(sbdpreds,dim=2)
             sbdpreds = torch.squeeze(sbdpreds, dim=0)
             sbdpreds = sbdpreds.tolist()
@@ -405,14 +406,15 @@ class MTLModel(nn.Module):
         poslogits = self.hidden2postag(feats)
         poslogits = self.poscrf(poslogits)
 
+        # Some memory management
         del embeddings
-        del finalembeddings
+        del sbdembeddings
         del avgembeddings
+        del posembeddings
         del feats
-
         torch.cuda.empty_cache()
 
-        return sbdlogits,finalsbdlabels,sbdpreds, poslogits,poslabels # returns the logits and labels
+        return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels # returns the logits and labels
 
 class Tagger():
     def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=512,sbdrnnnumlayers=2,sbdrnnbidirectional=True,sbdrnndropout=0.3,sbdencodertype='lstm',sbdffdim=512,learningrate = 0.001):
@@ -512,12 +514,12 @@ class Tagger():
 
         for epoch in range(1,epochs):
 
+            old_batchsize = self.mtlmodel.batch_size
             self.mtlmodel.train()
             self.optimizer.zero_grad()
 
-            data = sample(trainingdata,SAMPLE_SIZE)
+            data = sample(trainingdata,self.mtlmodel.batch_size)
             data = [datum for datum in data if len(datum) == self.mtlmodel.sequence_length]
-            self.mtlmodel.batch_size = len(data)
 
             sbdlogits, sbdlabels, _, poslogits,poslabels = self.mtlmodel(data)
 
@@ -536,9 +538,11 @@ class Tagger():
 
             mtlloss = posloss + sbdloss # uniform weighting. # TODO: learnable weights?
             mtlloss.backward()
-            #sbdloss.backward()
             self.optimizer.step()
             #self.scheduler.step()
+
+            if old_batchsize != self.mtlmodel.batch_size:
+                self.mtlmodel.batch_size = old_batchsize
 
             self.writer.add_scalar('train_pos_loss', posloss.item(), epoch)
             self.writer.add_scalar('train_sbd_loss', sbdloss.item(), epoch)
@@ -546,8 +550,9 @@ class Tagger():
 
             if epoch % self.evalstep == 0:
 
+
                 self.mtlmodel.eval()
-                #start = time()
+
                 with torch.no_grad():
 
                     totalsbddevloss = 0
@@ -558,9 +563,11 @@ class Tagger():
                     allpospreds = []
                     allposgold = []
 
-                    invalidlabelscount = 0
-
                     for slice in devdata:
+
+                        old_seqlen = self.mtlmodel.sequence_length
+                        if len(slice) != self.mtlmodel.sequence_length: # this will happen in one case, for the last slice in the dev batch
+                            self.mtlmodel.sequence_length = len(slice)
 
                         sentence = ' '.join([s.split('\t')[0].strip() for s in slice])
                         sentence = Sentence(sentence,use_tokenizer=False)
@@ -572,32 +579,22 @@ class Tagger():
 
                         sbdlogits, sbdlabels, sbdpreds, poslogits, poslabels = self.mtlmodel(slice,mode='dev')
 
-                        if sbdlabels is not None:
+                        # get the pos predictions
+                        lengths = [self.mtlmodel.sequence_length]
+                        lengths = torch.LongTensor(lengths).to(self.device)
+                        scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
+                        pospreds = self.mtlmodel.viterbidecoder.decode(scores,False,[sentence])
+                        pospreds = [self.mtlmodel.postagsetcrf.get_idx_for_item(p[0]) for pr in pospreds[0] for p in pr]
 
-                            # get the pos predictions
-                            lengths = [self.mtlmodel.sequence_length]
-                            lengths = torch.LongTensor(lengths).to(self.device)
-                            scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
-                            pospreds = self.mtlmodel.viterbidecoder.decode(scores,False,[sentence])
-                            pospreds = [self.mtlmodel.postagsetcrf.get_idx_for_item(p[0]) for pr in pospreds[0] for p in pr]
+                        # get the sbd loss
+                        sbdlogits = sbdlogits.permute(0,2,1)
+                        sbdtags = torch.LongTensor(sbdlabels).to(self.device)
+                        sbddevloss = self.sbdloss(sbdlogits, sbdtags).item()
 
-                            # get the sbd loss
-                            sbdlogits = sbdlogits.permute(0,2,1)
-                            sbdtags = torch.LongTensor(sbdlabels).to(self.device)
-                            sbddevloss = self.sbdloss(sbdlogits, sbdtags).item()
-
-                            # get the pos loss
-                            postags = torch.LongTensor(poslabels)
-                            postags = postags.to(self.device)
-                            posdevloss = self.postagloss(scores,postags).item()
-
-                        else:
-                            sbdpreds = [self.mtlmodel.sbd_tag2idx["O"] for _ in goldsbdlabels]
-                            pospreds = [self.mtlmodel.postagset['X'] for _ in goldsbdlabels]
-                            invalidlabelscount += len(goldsbdlabels)
-                            sbddevloss = 0
-                            posdevloss = 0
-
+                        # get the pos loss
+                        postags = torch.LongTensor(poslabels)
+                        postags = postags.to(self.device)
+                        posdevloss = self.postagloss(scores,postags).item()
 
                         totalsbddevloss += sbddevloss
                         totalposdevloss += posdevloss
@@ -606,6 +603,9 @@ class Tagger():
                         allsbdgold.extend(goldsbdlabels)
                         allpospreds.extend(pospreds)
                         allposgold.extend(goldposlabels)
+
+                    if self.mtlmodel.sequence_length != old_seqlen:
+                        self.mtlmodel.sequence_length = old_seqlen
 
                     goldspans = []
                     predspans = []
@@ -623,9 +623,6 @@ class Tagger():
 
                     correctpos = sum([1 if p == g else 0 for p,g in zip(allpospreds,allposgold)])
                     posscores = Score(len(allposgold),len(allpospreds),correctpos,len(allpospreds))
-
-                    print ('invalid labels:' + str(invalidlabelscount))
-                    print('\n')
 
                     self.writer.add_scalar("mtl_dev_loss", round((totalsbddevloss / len(devdata) + (totalposdevloss / len(devdata))), 2),
                                            int(epoch / self.evalstep))
@@ -652,6 +649,7 @@ class Tagger():
                     print('pos dev f1:' + str(posscores.f1))
                     print('pos dev precision:' + str(posscores.precision))
                     print('pos dev recall:' + str(posscores.recall))
+                    print('\n')
 
 
 
