@@ -16,7 +16,6 @@ from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
 from time import time
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
-SAMPLE_SIZE = 16
 
 def spans_score(gold_spans, system_spans):
     correct, gi, si = 0, 0, 0
@@ -72,7 +71,7 @@ class PositionalEncoding(nn.Module):
 
 
 class MTLModel(nn.Module):
-    def __init__(self,sbdrnndim=512,posrnndim=512,sbdrnnnumlayers=2,posrnnnumlayers=2,sbdrnnbidirectional=True,posrnnbidirectional=True,sbdrnndropout=0.3,posrnndropout=0.3,sbdencodertype='lstm',posencodertype='lstm',sbdffdim=512,posffdim=512,batchsize=SAMPLE_SIZE,sbdtransformernumlayers=6,sbdnhead=8,sequencelength=128):
+    def __init__(self,sbdrnndim=512,posrnndim=512,sbdrnnnumlayers=2,posrnnnumlayers=2,sbdrnnbidirectional=True,posrnnbidirectional=True,sbdrnndropout=0.3,posrnndropout=0.3,sbdencodertype='lstm',posencodertype='lstm',sbdffdim=512,posffdim=512,batchsize=16,sbdtransformernumlayers=4,sbdnhead=4,sequencelength=128):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -93,6 +92,7 @@ class MTLModel(nn.Module):
         self.batch_size = batchsize
 
         # Embedding parameters and model
+        # Embeddings on the cpu.
         self.tokenizer = BertTokenizerFast.from_pretrained('onlplab/alephbert-base')
         self.model = BertModel.from_pretrained('onlplab/alephbert-base').to(self.device)
         self.embeddingdim = 768
@@ -290,6 +290,7 @@ class MTLModel(nn.Module):
         tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already.
         embeddings = self.model(**tokens)
         embeddings = embeddings[0]
+        #embeddings = embeddings.to(self.device)
 
         """
         Average the subword embeddings
@@ -459,7 +460,7 @@ class Tagger():
                                            list(self.mtlmodel.hidden2sbd.parameters()) + list(self.mtlmodel.posencoder.parameters()) + list(self.mtlmodel.posfflayer.parameters())
                                            + list(self.mtlmodel.hidden2postag.parameters()) + list(self.mtlmodel.poscrf.parameters()), lr=learningrate)
 
-        #self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[150,400],gamma=0.1)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[400,1000],gamma=0.1)
         self.evalstep = 20
 
         self.set_seed(42)
@@ -520,6 +521,7 @@ class Tagger():
 
             data = sample(trainingdata,self.mtlmodel.batch_size)
             data = [datum for datum in data if len(datum) == self.mtlmodel.sequence_length]
+            self.mtlmodel.batch_size = len(data)
 
             sbdlogits, sbdlabels, _, poslogits,poslabels = self.mtlmodel(data)
 
@@ -536,10 +538,11 @@ class Tagger():
             postags = torch.LongTensor(postags).to(self.device)
             posloss = self.postagloss(scores,postags)
 
+
             mtlloss = posloss + sbdloss # uniform weighting. # TODO: learnable weights?
             mtlloss.backward()
             self.optimizer.step()
-            #self.scheduler.step()
+            self.scheduler.step()
 
             if old_batchsize != self.mtlmodel.batch_size:
                 self.mtlmodel.batch_size = old_batchsize
@@ -549,7 +552,6 @@ class Tagger():
             self.writer.add_scalar('train_joint_loss', mtlloss.item(), epoch)
 
             if epoch % self.evalstep == 0:
-
 
                 self.mtlmodel.eval()
 
@@ -563,6 +565,7 @@ class Tagger():
                     allpospreds = []
                     allposgold = []
 
+                    start = time()
                     for slice in devdata:
 
                         old_seqlen = self.mtlmodel.sequence_length
@@ -604,6 +607,8 @@ class Tagger():
                         allpospreds.extend(pospreds)
                         allposgold.extend(goldposlabels)
 
+                    print ('inference time')
+                    print (time() - start)
                     if self.mtlmodel.sequence_length != old_seqlen:
                         self.mtlmodel.sequence_length = old_seqlen
 
