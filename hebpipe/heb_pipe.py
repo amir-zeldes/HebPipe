@@ -12,6 +12,8 @@ import stanza
 from stanza.models.common.doc import Document
 import torch
 
+from time import time
+
 from rftokenizer import RFTokenizer
 try:  # Module usage
     from .lib.xrenner import Xrenner
@@ -22,6 +24,7 @@ try:  # Module usage
     from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
     from .lib.flair_sent_splitter import FlairSentSplitter
     from .lib.flair_pos_tagger import FlairTagger
+    from .lib.multitask_sentsplitter_postagger import Tagger
 except ImportError:  # direct script usage
     from lib.xrenner import Xrenner
     from lib._version import __version__
@@ -31,6 +34,7 @@ except ImportError:  # direct script usage
     from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
     from lib.flair_sent_splitter import FlairSentSplitter
     from lib.flair_pos_tagger import FlairTagger
+    from lib.multitask_sentsplitter_postagger import Tagger
 
 PY3 = sys.version_info[0] > 2
 
@@ -588,177 +592,202 @@ def download_requirements(models_ok=True):
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
         out_mode="conllu", sent_tag=None, preloaded=None, punct_sentencer=False, from_pipes=False, filecount=1):
 
-    data = input_data.replace("\t","")
-    data = data.replace("\r","")
+        data = input_data.replace("\t","")
+        data = data.replace("\r","")
 
-    if from_pipes:
-        input_data = input_data.replace("|","")
+        if from_pipes:
+            input_data = input_data.replace("|","")
 
-    if preloaded is not None:
-        rf_tok, xrenner, flair_sent_splitter, parser, tagger, morpher, lemmatizer = preloaded
-    else:
-        rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
-        xrenner = Xrenner(model=model_dir + "heb.xrm")
-        if sent_tag == "auto" and not punct_sentencer:
-            flair_sent_splitter = FlairSentSplitter(model_path=model_dir + "heb.sent")
+        #start = time.time()
+        mtltagger = Tagger(trainflag=False)
+        #print ('mtl init')
+        #print (time.time() - start)
+
+
+        if preloaded is not None:
+            rf_tok, xrenner, flair_sent_splitter, parser, tagger, morpher, lemmatizer = preloaded
         else:
-            flair_sent_splitter = None
-        parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
-        tagger = None if not do_tag else FlairTagger()
-        morpher = None if not do_tag else FlairTagger(morph=True)
-        lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
 
-    if do_whitespace:
-        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto", from_pipes=from_pipes)
 
-    if from_pipes:
-        tokenized = data
-    else:
-        if do_tok:
-            tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
-            tokenized = "\n".join(tokenized)
-        else:
-            # Assume data is already one token per line
-            tokenized = data
 
-    bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
+            rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
+            xrenner = Xrenner(model=model_dir + "heb.xrm")
 
-    if sent_tag == "auto":
-        sent_tag = "s"
-        if punct_sentencer:
-            tokenized = toks_to_sents(tokenized)
-        else:
-            tokenized = flair_sent_splitter.split(tokenized)
-            if filecount == 1:
-                # Free up GPU memory if no more files need it
-                del flair_sent_splitter
-            torch.cuda.empty_cache()
-
-    if out_mode == "pipes":
-        return tokenized
-    else:
-        tokenized = tokenized.split("\n")
-        retokenized = []
-        for line in tokenized:
-            if line == "|":
-                retokenized.append(line)
+            """
+            if sent_tag == "auto" and not punct_sentencer:
+                flair_sent_splitter = FlairSentSplitter(model_path=model_dir + "heb.sent")
             else:
-                retokenized.append("\n".join(line.split("|")))
-        tokenized = "\n".join(retokenized)
+                flair_sent_splitter = None
+            """
+            parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
+            #tagger = None if not do_tag else FlairTagger()
+            morpher = None if not do_tag else FlairTagger(morph=True)
+            lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
 
-    if do_tag:
-        # Flair
-        to_tag = conllize(tokenized,element="s",super_mapping=bound_group_map,attrs_as_comments=True)
-        tagged_conllu = tagger.predict(to_tag, in_format="conllu", as_text=True)
-        # Uncomment to test lemmatizer with gold POS tags
-        #tagged_conllu = io.open("he_htb-ud-test.conllu",encoding="utf8").read()
-        #opts = type('', (), {"quiet":False, "kill":"both"})()
-        #d = DepEdit(config_file=[],options=opts)
-        #tagged_conllu = d.run_depedit(tagged_conllu)
+        if do_whitespace:
+            data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto", from_pipes=from_pipes)
+
+        if from_pipes:
+            tokenized = data
+        else:
+            if do_tok:
+                tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
+                tokenized = "\n".join(tokenized)
+            else:
+                # Assume data is already one token per line
+                tokenized = data
+
+        bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
+
+        """
+        if sent_tag == "auto":
+            sent_tag = "s"
+            if punct_sentencer:
+                tokenized = toks_to_sents(tokenized)
+            else:
+                tokenized = flair_sent_splitter.split(tokenized)
+                if filecount == 1:
+                    # Free up GPU memory if no more files need it
+                    del flair_sent_splitter
+                torch.cuda.empty_cache()
+    
+        if out_mode == "pipes":
+            return tokenized
+        else:
+            tokenized = tokenized.split("\n")
+            retokenized = []
+            for line in tokenized:
+                if line == "|":
+                    retokenized.append(line)
+                else:
+                    retokenized.append("\n".join(line.split("|")))
+            tokenized = "\n".join(retokenized)
+    
+        if do_tag:
+            # Flair
+            to_tag = conllize(tokenized,element="s",super_mapping=bound_group_map,attrs_as_comments=True)
+            tagged_conllu = tagger.predict(to_tag, in_format="conllu", as_text=True)
+            # Uncomment to test lemmatizer with gold POS tags
+            #tagged_conllu = io.open("he_htb-ud-test.conllu",encoding="utf8").read()
+            #opts = type('', (), {"quiet":False, "kill":"both"})()
+            #d = DepEdit(config_file=[],options=opts)
+            #tagged_conllu = d.run_depedit(tagged_conllu)
+            pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
+        """
+
+        sent_tag = 's'
+        start = time()
+        tagged_conllu, tokenized = mtltagger.split_pos(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/best_sent_pos_model_12.603806_0.866864_0.971045.pt')
         pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
 
-        #morpher = None
-        if morpher is None:
-            # Marmot
-            if platform.system() == "Windows":
-                tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+        del mtltagger
+        del rf_tok
+        torch.cuda.empty_cache()
+
+        if do_tag:
+
+            #morpher = None
+            if morpher is None:
+                # Marmot
+                if platform.system() == "Windows":
+                    tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar;trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+                else:
+                    tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar:trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
+                no_sent = re.sub(r'</?s( [^<>]+)?>\n?','',tokenized).strip()
+                morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
+                morphed = morphed.strip().split("\n")
+                # Clean up tags for OOV glyphs
+                cleaned = []
+                toknum = 0
+                for line in morphed:
+                    if "\t" in line:
+                        fields = line.split("\t")
+                        fields[5] = pos_tags[toknum]  # Insert flair tags
+                        if fields[1] in KNOWN_PUNCT:  # Hard fix unicode punctuation
+                            fields[5] = "PUNCT"
+                            fields[7] = "_"
+                        line = "\t".join(fields)
+                        toknum += 1
+                    cleaned.append(line)
+                # morphed = cleaned
+                morphs = get_col(morphed, 7)
+                words = get_col(morphed, 1)
+                lemmas = get_col(morphed, 3)
+                tagged = inject_col(morphed, tokenized, 5)
             else:
-                tag = ["java","-Dfile.encoding=UTF-8","-Xmx2g","-cp","marmot.jar:trove.jar","marmot.morph.cmd.Annotator","-model-file","heb.marmot","-lemmatizer-file","heb.lemming","-test-file","form-index=0,tempfilename","-pred-file","tempfilename2"]
-            no_sent = re.sub(r'</?s( [^<>]+)?>\n?','',tokenized).strip()
-            morphed = exec_via_temp(no_sent, tag, workdir=marmot_path, outfile=True)
-            morphed = morphed.strip().split("\n")
-            # Clean up tags for OOV glyphs
-            cleaned = []
-            toknum = 0
-            for line in morphed:
-                if "\t" in line:
-                    fields = line.split("\t")
-                    fields[5] = pos_tags[toknum]  # Insert flair tags
-                    if fields[1] in KNOWN_PUNCT:  # Hard fix unicode punctuation
-                        fields[5] = "PUNCT"
-                        fields[7] = "_"
-                    line = "\t".join(fields)
-                    toknum += 1
-                cleaned.append(line)
-            # morphed = cleaned
-            morphs = get_col(morphed, 7)
-            words = get_col(morphed, 1)
-            lemmas = get_col(morphed, 3)
-            tagged = inject_col(morphed, tokenized, 5)
+                # flair
+                morphed = morpher.predict(tagged_conllu, in_format="conllu", as_text=True, tags=True)
+                morphs = get_col(morphed, 4)
+                words = get_col(morphed, 1)
+                # Uncomment to test with gold morphology from tagged_conllu
+                #morphs = get_col(tagged_conllu, 5)
+                #morphed = inject_col(morphs, tagged_conllu, into_col=5, skip_supertoks=True)
+                zeros = ["0" for i in range(len(morphs))]
+                zero_conllu = inject_col(zeros,tagged_conllu,into_col=6, skip_supertoks=True)
+                lemmas = lemmatize(lemmatizer,zero_conllu,morphs)
+                tagged = inject_col(tagged_conllu,tokenized,4)
+
+            if do_lemma:
+                lemmatized = inject_col(lemmas,tagged,-1)
+            else:
+                lemmatized = tagged
+
+            morphs = postprocess_morph(morphs, words, lemmas)
+            morphed = inject_col(morphs,lemmatized,-1)
+
+            if not do_parse:
+                if out_mode == "conllu":
+                    conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                         attrs_as_comments=True)
+                    conllized = add_space_after(input_data,conllized)
+                    return conllized
+                else:
+                    if not PY3:
+                        morphed = morphed.decode("utf8")
+                    return morphed
+
         else:
-            # flair
-            morphed = morpher.predict(tagged_conllu, in_format="conllu", as_text=True, tags=True)
-            morphs = get_col(morphed, 4)
-            words = get_col(morphed, 1)
-            # Uncomment to test with gold morphology from tagged_conllu
-            #morphs = get_col(tagged_conllu, 5)
-            #morphed = inject_col(morphs, tagged_conllu, into_col=5, skip_supertoks=True)
-            zeros = ["0" for i in range(len(morphs))]
-            zero_conllu = inject_col(zeros,tagged_conllu,into_col=6, skip_supertoks=True)
-            lemmas = lemmatize(lemmatizer,zero_conllu,morphs)
-            tagged = inject_col(tagged_conllu,tokenized,4)
-
-        if do_lemma:
-            lemmatized = inject_col(lemmas,tagged,-1)
-        else:
-            lemmatized = tagged
-
-        morphs = postprocess_morph(morphs, words, lemmas)
-        morphed = inject_col(morphs,lemmatized,-1)
-
-        if not do_parse:
             if out_mode == "conllu":
-                conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
                                      attrs_as_comments=True)
-                conllized = add_space_after(input_data,conllized)
+                conllized = add_space_after(input_data, conllized)
                 return conllized
             else:
-                if not PY3:
-                    morphed = morphed.decode("utf8")
-                return morphed
+                return tokenized
 
-    else:
-        if out_mode == "conllu":
-            conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                 attrs_as_comments=True)
-            conllized = add_space_after(input_data, conllized)
-            return conllized
-        else:
-            return tokenized
+        if do_parse:
+            if filecount == 1:
+                # Free up GPU memory if no more files need it
+                del morpher
+                del tagger
+                torch.cuda.empty_cache()
 
-    if do_parse:
-        if filecount == 1:
-            # Free up GPU memory if no more files need it
-            del morpher
-            del tagger
-            torch.cuda.empty_cache()
+            conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                 attrs_as_comments=True, ten_cols=True)
+            parsed = diaparse(parser, conllized)
+            parsed = morph_deped.run_depedit(parsed)
 
-        conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                             attrs_as_comments=True, ten_cols=True)
-        parsed = diaparse(parser, conllized)
-        parsed = morph_deped.run_depedit(parsed)
-
-        if do_entity:
-            xrenner.docname = "_"
-            ents = xrenner.analyze(parsed,"conll_sent")
-            ents = get_col(ents, -1)
-            entified = inject_col(ents, parsed, col=-1, into_col=9, skip_supertoks=True)
-            entified = add_space_after(input_data,entified)
-            if PY3:
-                return entified
+            if do_entity:
+                xrenner.docname = "_"
+                ents = xrenner.analyze(parsed,"conll_sent")
+                ents = get_col(ents, -1)
+                entified = inject_col(ents, parsed, col=-1, into_col=9, skip_supertoks=True)
+                entified = add_space_after(input_data,entified)
+                if PY3:
+                    return entified
+                else:
+                    return entified.decode("utf8")
             else:
-                return entified.decode("utf8")
+                parsed = add_space_after(input_data,parsed)
+                return parsed
         else:
-            parsed = add_space_after(input_data,parsed)
-            return parsed
-    else:
-        if out_mode == "conllu":
-            conllized = conllize(tagged, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                 attrs_as_comments=True)
-            conllized = add_space_after(input_data, conllized)
-            return conllized
-        else:
-            return tagged
+            if out_mode == "conllu":
+                conllized = conllize(tagged, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                     attrs_as_comments=True)
+                conllized = add_space_after(input_data, conllized)
+                return conllized
+            else:
+                return tagged
 
 
 def run_hebpipe():
@@ -859,7 +888,8 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
             else:
                 sys.stderr.write("Aborting\n")
                 sys.exit(0)
-        tagger = FlairTagger()
+        #tagger = FlairTagger()
+        tagger = None
         morpher = FlairTagger(morph=True)
         lemmatizer = init_lemmatizer(cpu=opts.cpu, no_post_process=opts.disable_lex)
     else:
@@ -875,7 +905,8 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
         xrenner = Xrenner(model=model_dir + "heb.xrm")
     else:
         xrenner = None
-    flair_sent_splitter = FlairSentSplitter() if opts.sent == "auto" and not opts.punct_sentencer else None
+    #flair_sent_splitter = FlairSentSplitter() if opts.sent == "auto" and not opts.punct_sentencer else None
+    flair_sent_splitter = None
     dep_parser = Parser.load(model_dir+"heb.diaparser") if opts.dependencies else None
 
     for infile in files:
@@ -917,5 +948,8 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
 if __name__ == "__main__":
     import logging
+    from time import time
     logging.disable(logging.INFO)
+    startpipeline = time()
     run_hebpipe()
+
