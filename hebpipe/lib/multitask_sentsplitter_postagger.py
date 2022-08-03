@@ -4,22 +4,23 @@ import torch.nn as nn
 import os
 import shutil
 import random
-import math
 import re
+import argparse
+
 
 from flair.data import Dictionary, Sentence
 from lib.dropout import WordDropout,LockedDropout
-from transformers import BertModel,BertTokenizerFast
+from transformers import BertModel,BertTokenizerFast,BertConfig
 from random import sample
 from collections import defaultdict
 from lib.crfutils.crf import CRF
 from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
-from .reorder_sgml import reorder
-from .tt2conll import conllize
+from lib.reorder_sgml import reorder
+from lib.tt2conll import conllize
 
 from time import time
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
+#os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 
 class Score:
         def __init__(self, gold_total, system_total, correct, aligned_total=None):
@@ -42,7 +43,7 @@ class UDSpan:
 
 
 class MTLModel(nn.Module):
-    def __init__(self,sbdrnndim=128,posrnndim=256,sbdrnnnumlayers=1,posrnnnumlayers=1,sbdrnnbidirectional=True,posrnnbidirectional=True,sbdencodertype='lstm',posencodertype='lstm',batchsize=16,sequencelength=128,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
+    def __init__(self,sbdrnndim=128,posrnndim=256,sbdrnnnumlayers=1,posrnnnumlayers=1,posfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',batchsize=16,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -50,6 +51,7 @@ class MTLModel(nn.Module):
         # tagsets - amend labels here
         self.postagset = {'ADJ':0, 'ADP':1, 'ADV':2, 'AUX':3, 'CCONJ':4, 'DET':5, 'INTJ':6, 'NOUN':7, 'NUM':8, 'PRON':9, 'PROPN':10, 'PUNCT':11, 'SCONJ':12, 'SYM':13, 'VERB':14, 'X':15} # derived from HTB and IAHLTWiki trainsets #TODO: add other UD tags?
         self.sbd_tag2idx = {'B-SENT': 1,'O': 0}
+        self.supertokenset = {'O':0,'B':1,'I':2,'E':3}
 
         # POS tagset in Dictionary object for Flair CRF
         self.postagsetcrf = Dictionary()
@@ -63,10 +65,14 @@ class MTLModel(nn.Module):
         self.batch_size = batchsize
 
         # Embedding parameters and model
-        # Embeddings on the cpu.
+        config = BertConfig.from_pretrained('onlplab/alephbert-base',output_hidden_states=True)
         self.tokenizer = BertTokenizerFast.from_pretrained('onlplab/alephbert-base')
-        self.model = BertModel.from_pretrained('onlplab/alephbert-base').to(self.device)
+        self.model = BertModel.from_pretrained('onlplab/alephbert-base',config=config).to(self.device)
         self.embeddingdim = 768
+        self.lastn = 4
+
+        for param in self.model.base_model.parameters():
+            param.requires_grad = False
 
         # Bi-LSTM Encoder for SBD
         self.sbdrnndim = sbdrnndim
@@ -98,11 +104,11 @@ class MTLModel(nn.Module):
                 nn.init.constant_(param,0.0)
 
         if posencodertype == 'lstm':
-            self.posencoder = nn.LSTM(input_size=self.embeddingdim + 1, hidden_size=self.posrnndim // 2,
+            self.posencoder = nn.LSTM(input_size=self.embeddingdim + 5, hidden_size=self.posrnndim // 2,
                                  num_layers=self.posrnnnumlayers, bidirectional=self.posrnnbidirectional,
                                  batch_first=True).to(self.device)
         elif posencodertype == 'gru':
-            self.posencoder = nn.GRU(input_size=self.embeddingdim + 1, hidden_size=self.posrnndim // 2,
+            self.posencoder = nn.GRU(input_size=self.embeddingdim + 5, hidden_size=self.posrnndim // 2,
                                    num_layers=self.posrnnnumlayers, bidirectional=self.posrnnbidirectional,
                                    batch_first=True).to(self.device)
 
@@ -116,10 +122,12 @@ class MTLModel(nn.Module):
             except ValueError as ex:
                 nn.init.constant_(param, 0.0)
 
-        #self.relu = nn.ReLU()
+        self.relu = nn.ReLU()
 
         # Reproject embeddings layer
-        self.sbdembedding2nn = nn.Linear(in_features=self.embeddingdim,out_features=self.embeddingdim).to(self.device)
+        self.sbdembedding2nn = nn.Linear(in_features=self.embeddingdim ,out_features=self.embeddingdim).to(self.device)
+        self.sbdfflayerdim = sbdfflayerdim
+        self.sbdfflayer = nn.Linear(in_features=self.sbdrnndim, out_features=self.sbdfflayerdim).to(self.device)
 
         # param init
         for name, param in self.sbdembedding2nn.named_parameters():
@@ -129,7 +137,9 @@ class MTLModel(nn.Module):
                 nn.init.xavier_normal_(param)
 
         # Intermediate feedforward layer
-        self.posembedding2nn = nn.Linear(in_features=self.embeddingdim + 1,out_features=self.embeddingdim + 1).to(self.device)
+        self.posembedding2nn = nn.Linear(in_features=self.embeddingdim  + 5,out_features=self.embeddingdim  + 5).to(self.device)
+        self.posfflayerdim = posfflayerdim
+        self.posfflayer = nn.Linear(in_features=self.posrnndim, out_features=self.posfflayerdim).to(self.device)
 
         # param init
         for name, param in self.posembedding2nn.named_parameters():
@@ -139,7 +149,7 @@ class MTLModel(nn.Module):
                 nn.init.xavier_normal_(param)
 
         # Label space for the pos tagger
-        self.hidden2postag = nn.Linear(in_features=self.posrnndim,out_features=len(self.postagsetcrf)).to(self.device)
+        self.hidden2postag = nn.Linear(in_features=self.posfflayerdim,out_features=len(self.postagsetcrf)).to(self.device)
         for name, param in self.hidden2postag.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
@@ -147,7 +157,7 @@ class MTLModel(nn.Module):
                 nn.init.xavier_normal_(param)
 
         # Label space for sent splitter
-        self.hidden2sbd = nn.Linear(in_features=self.sbdrnndim,out_features=len(self.sbd_tag2idx.keys())).to(self.device)
+        self.hidden2sbd = nn.Linear(in_features=self.sbdfflayerdim,out_features=len(self.sbd_tag2idx.keys())).to(self.device)
 
         # param init
         for name, param in self.hidden2sbd.named_parameters():
@@ -235,24 +245,60 @@ class MTLModel(nn.Module):
             sentences = [' '.join([s.split('\t')[0].strip() for s in sls]) for sls in data]
             sbdlabels = [[self.sbd_tag2idx[s.split('\t')[2].strip()] for s in sls] for sls in data]
             poslabels = [[self.postagsetcrf.get_idx_for_item(s.split('\t')[1].strip()) for s in sls] for sls in data]
+
+            supertokenlabels = []
+            for sls in data:
+                record = []
+                for s in sls:
+                    temp = [0] * len(self.supertokenset)
+                    temp[self.supertokenset[s.split('\t')[-1].strip()]] = 1
+                    record.append(temp)
+                supertokenlabels.append(record)
+
         elif mode == 'dev': # inference is on a single record
             sentences = [' '.join([s.split('\t')[0].strip() for s in data])]
             sbdlabels = [self.sbd_tag2idx[s.split('\t')[2].strip()] for s in data]
             poslabels = [self.postagsetcrf.get_idx_for_item(s.split('\t')[1].strip()) for s in data]
-        else: # test - has no labels, and 2D tensor single record
-            sentences = [' '.join([s.split('\t')[0].strip() for s in data])]
+
+            supertokenlabels = []
+            for s in data:
+                temp = [0] * len(self.supertokenset)
+                temp[self.supertokenset[s.split('\t')[-1].strip()]] = 1
+                supertokenlabels.append(temp)
+
+        else: # test - a tuple of text and supertoken labels
+            sentences = [' '.join([s.split('\t')[0].strip() for s in data[0]])]
+
+            supertokenlabels = []
+            for s in data[1]:
+                temp = [0] * len(self.supertokenset)
+                temp[self.supertokenset[s.strip()]] = 1
+                supertokenlabels.append(temp)
+
             sbdlabels = None
             poslabels = None
 
-        # Make embeddings
+        # Make embeddings and scalar average them across subwords, vertically.
         sentences = [d.split() for d in sentences] # for AlephBERT
-        tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True).to(self.device) # tell AlephBERT that there is some tokenization already.
-        embeddings = self.model(**tokens)
-        embeddings = embeddings[0]
+        tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True,truncation=True).to(self.device) # tell AlephBERT that there is some tokenization already.
+        try:
+            output = self.model(**tokens)
+        except Exception:
+            print ('here')
+            raise
+        hiddenstates = output[2][-self.lastn:]
+        scalarsum = hiddenstates[0]
+        for i in range(1,self.lastn):
+            scalarsum = torch.add(scalarsum,hiddenstates[i],alpha=1)
+
+        embeddings = torch.div(scalarsum,self.lastn)
+        #embeddings = embeddings.to(self.device)
+
+        #embeddings = embeddings[0]
         #embeddings = embeddings.to(self.device)
 
         """
-        Average the subword embeddings
+        Average the subword embeddings within the horizontal sequence.
         This process will drop the [CLS],[SEP] and [PAD] tokens
         """
 
@@ -272,7 +318,7 @@ class MTLModel(nn.Module):
 
                 indices = [j for j,x in enumerate(tokens.encodings[k].words) if x == i]
                 if len(indices) == 0: # This strange case needs to be handled.
-                    emb.append(torch.zeros(self.embeddingdim,device=self.device))
+                    emb.append(torch.zeros(self.embeddingdim ,device=self.device))
                 elif len(indices) == 1: # no need to average
                     emb.append(embeddings[k][indices[0]])
                 else: # needs to aggregate - average
@@ -322,6 +368,8 @@ class MTLModel(nn.Module):
 
         # SBD encoder and labels
         feats, _ = self.sbdencoder(sbdembeddings)
+        feats = self.sbdfflayer(feats)
+        feats = self.relu(feats)
         feats = self.dropout(feats)
         feats = self.lockeddropout(feats)
 
@@ -349,8 +397,13 @@ class MTLModel(nn.Module):
             else:
                 sbdpreds = torch.argmax(sbdlogits, dim=2, keepdim=True)
 
+        supertokenlabels = torch.LongTensor(supertokenlabels)
+        supertokenlabels = supertokenlabels.to(self.device)
+        if mode in ('dev','test'):
+            supertokenlabels = torch.unsqueeze(supertokenlabels,dim=0)
+
         # Add the SBD predictions to the POS Encoder Input!
-        posembeddings = torch.cat((avgembeddings,sbdpreds),dim=2)
+        posembeddings = torch.cat((avgembeddings,sbdpreds,supertokenlabels),dim=2)
 
         if mode in ('dev','test'):
             # Squeeze these to return to the Trainer for scores, now that we are done with them
@@ -366,6 +419,8 @@ class MTLModel(nn.Module):
         posembeddings = self.posembedding2nn(posembeddings)
 
         feats,_ = self.posencoder(posembeddings)
+        feats = self.posfflayer(feats)
+        feats = self.relu(feats)
         feats = self.dropout(feats)
         feats = self.lockeddropout(feats)
 
@@ -376,9 +431,9 @@ class MTLModel(nn.Module):
         return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels # returns the logits and labels
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=128,sbdrnnnumlayers=1,sbdrnnbidirectional=True,dropout=0.0,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/'):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=128,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=256,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
 
-        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout)
+        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
 
         if trainflag == True:
 
@@ -395,7 +450,7 @@ class Tagger():
             self.trainingdatafile = '../data/sentsplit_postag_train_gold.tab'
             self.devdatafile = '../data/sentsplit_postag_dev_gold.tab'
 
-            self.bestmodel = bestmodelpath + 'best_sent_pos_model.pt'
+            self.bestmodel = bestmodelpath + datatype + '_best_sent_pos_model.pt'
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -418,8 +473,8 @@ class Tagger():
                                            list(self.mtlmodel.hidden2sbd.parameters()) + list(self.mtlmodel.posencoder.parameters()) + list(self.mtlmodel.posembedding2nn.parameters())
                                            + list(self.mtlmodel.hidden2postag.parameters()) + list(self.mtlmodel.poscrf.parameters()), lr=learningrate)
 
-        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,milestones=[400,1000],gamma=0.1)
-        self.evalstep = 20
+        self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer,base_lr=learningrate/10,max_lr=learningrate,step_size_up=250,cycle_momentum=False)
+        self.evalstep = 50
 
     def set_seed(self, seed):
 
@@ -464,7 +519,7 @@ class Tagger():
 
             return dataset
 
-        epochs = 1000
+        epochs = 3500
         bestloss = float('inf')
 
         trainingdata = read_file()
@@ -508,7 +563,7 @@ class Tagger():
             mtlloss = posloss + sbdloss # TODO: learnable weights?
             mtlloss.backward()
             self.optimizer.step()
-            self.scheduler.step() # TODO: Multi-step LR annealing seems to increase sentence splitting performance. Need a best annealing strategy
+            self.scheduler.step()
 
             if old_batchsize != self.mtlmodel.batch_size:
                 self.mtlmodel.batch_size = old_batchsize
@@ -567,7 +622,9 @@ class Tagger():
                         # get the sbd loss
                         sbdlogits = sbdlogits.permute(0,2,1)
                         sbdtags = torch.LongTensor(sbdlabels).to(self.device)
+
                         sbddevloss = self.sbdloss(sbdlogits, sbdtags).item()
+
 
                         # get the pos loss
                         postags = torch.LongTensor(poslabels)
@@ -641,7 +698,6 @@ class Tagger():
 
     def predict(self,toks,checkpointfile=None):
 
-
         def is_tok(sgml_line):
             return len(sgml_line) > 0 and not (sgml_line.startswith("<") and sgml_line.endswith(">"))
 
@@ -656,23 +712,48 @@ class Tagger():
         slices = []
         toks = unescape(toks)  # Splitter is trained on UTF-8 forms, since LM embeddings know characters like '&'
         lines = toks.strip().split("\n")
+
+        # add super token tags
+        supertokenlabels = []
+        for i in range(0,len(lines)):
+            if i > 0:
+                prevtoken = lines[i-1]
+            if i < len(lines) - 1:
+                nexttoken = lines[i + 1]
+
+            currtoken = lines[i]
+
+            if is_tok(currtoken):
+                if not is_tok(prevtoken):
+                    if not is_tok(nexttoken):
+                        supertokenlabels.append("O")
+                    else:
+                        supertokenlabels.append("B")
+                else:
+                    if not is_tok(nexttoken):
+                        supertokenlabels.append("E")
+                    else:
+                        supertokenlabels.append("I")
+
         toks = [l for l in lines if is_tok(l)]
         toks = [re.sub(r"\t.*", "", t) for t in toks]
+
+        assert len(toks) == len(supertokenlabels)
 
         # slice up the token list into slices of seqlen for GPU RAM reasons
         for idx in range(0, len(toks), self.mtlmodel.sequence_length):
             if idx + self.mtlmodel.sequence_length >= len(toks):
                 slice = toks[idx:len(toks)]
+                supertokenslice = supertokenlabels[idx:len(toks)]
             else:
                 slice = toks[idx: idx + self.mtlmodel.sequence_length]
+                supertokenslice = supertokenlabels[idx: idx + self.mtlmodel.sequence_length]
 
-            slices.append(slice)
+            slices.append((slice,supertokenslice))
 
-        test = [d for slice in slices for d in slice]
+        test = [d for s in slices for d in s[0]]
 
         assert len(test) == len(toks)
-
-
 
         if checkpointfile is not None:
 
@@ -690,11 +771,11 @@ class Tagger():
 
             for slice in slices:
 
-                if len(slice) != self.mtlmodel.sequence_length:  # this will happen in one case, for the last slice in the batch
-                    self.mtlmodel.sequence_length = len(slice)
+                if len(slice[0]) != self.mtlmodel.sequence_length:  # this will happen in one case, for the last slice in the batch
+                    self.mtlmodel.sequence_length = len(slice[0])
 
                 # Flair CRF decoding uses the Sentence object..
-                sentence = ' '.join([s.split('\t')[0].strip() for s in slice])
+                sentence = ' '.join([s.split('\t')[0].strip() for s in slice[0]])
                 sentence = Sentence(sentence, use_tokenizer=False)
 
                 _, _, sbdpreds, poslogits, _ = self.mtlmodel(slice, mode='test')
@@ -725,15 +806,36 @@ class Tagger():
                 data = traindata
 
             with open(filename,'w') as tr:
+                length = -1
                 for sent in data:
-                    for i in range(0,len(sent)):
-                        if isinstance(sent[i]['id'], tuple): continue # MWE conventions in the conllu file
+                    i = 0
+                    while i < len(sent):
+                        if isinstance(sent[i]['id'], tuple):
+                            # fetch the super token tag
+                            supertoken = 'B'
+                            length = sent[i]['id'][-1] - sent[i]['id'][0]
+                            start = sent[i]['id'][0]
+                            i += 1
+                            continue
+                        elif length > 0 and supertoken in ('B','I'):
+                            if sent[i]['id'] == start:
+                                supertoken = 'B'
+                            else:
+                                supertoken = 'I'
+                            length -=1
+                        elif length == 0:
+                            supertoken = 'E'
+                            length = -1
+                        elif length == -1:
+                            supertoken = 'O'
 
                         if sent[i]['id'] == 1:
-                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'B-SENT' + '\n')
+                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'B-SENT' + '\t' + supertoken + '\n')
 
                         else:
-                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'O' + '\n')
+                            tr.write(sent[i]['form'] + '\t' + sent[i]['upos'] + '\t' + 'O' + '\t' + supertoken + '\n')
+
+                        i += 1
 
         traindata = self.read_conllu()
         devdata = self.read_conllu(mode='dev')
@@ -1030,16 +1132,54 @@ class Tagger():
 
 def main(): # testing only
 
-    iahltwikitrain = '/home/nitin/Desktop/IAHLT/UD_Hebrew-IAHLTwiki/he_iahltwiki-ud-train.conllu'
-    iahltwikidev = '/home/nitin/Desktop/IAHLT/UD_Hebrew-IAHLTwiki/he_iahltwiki-ud-dev.conllu'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--seqlen', type=int, default=192)
+    parser.add_argument('--trainbatch', type=int, default=16)
+    parser.add_argument('--datatype', type=str, default='wiki')
+    parser.add_argument('--sbdrnndim', type=int, default=256)
+    parser.add_argument('--posrnndim', type=int, default=512)
+    parser.add_argument('--sbdfflayerdim', type=int, default=256)
+    parser.add_argument('--posfflayerdim', type=int, default=512)
+    parser.add_argument('--posrnnbidirectional', type=bool, default=True)
+    parser.add_argument('--sbdrnnbidirectional', type=bool, default=True)
+    parser.add_argument('--posrnnnumlayers', type=int, default=1)
+    parser.add_argument('--sbdrnnnumlayers', type=int, default=1)
+    parser.add_argument('--sbdencodertype', type=str, default='lstm')
+    parser.add_argument('--posencodertype', type=str, default='lstm')
+    parser.add_argument('--dropout', type=float, default=0.05)
+    parser.add_argument('--worddropout', type=float, default=0.05)
+    parser.add_argument('--lockeddropout', type=float, default=0.5)
 
-    htbdev = '/home/nitin/Desktop/htb/UD_Hebrew/he_htb-ud-dev.conllu'
-    htbtrain = '/home/nitin/Desktop/htb/UD_Hebrew/he_htb-ud-train.conllu'
 
-    tagger = Tagger(trainflag=True,trainfile=iahltwikitrain,devfile=iahltwikidev)
-    #tagger = Tagger(trainflag=True,trainfile=htbtrain,devfile=htbdev)
+    args = parser.parse_args()
+
+    iahltwikitrain = '../he_iahltwiki-ud-train.conllu'
+    iahltwikidev = '../he_iahltwiki-ud-dev.conllu'
+
+    htbdev = '../he_htb-ud-dev.conllu'
+    htbtrain = '../he_htb-ud-train.conllu'
+
+    if args.datatype == 'wiki':
+        tagger = Tagger(trainflag=True, trainfile=iahltwikitrain, devfile=iahltwikidev, sbdrnndim=args.sbdrnndim, sbdfflayerdim=args.sbdfflayerdim,
+                        posrnndim=args.posrnndim, posfflayerdim=args.posfflayerdim, sbdrnnbidirectional=args.sbdrnnbidirectional,
+                        posrnnbidirectional=args.posrnnbidirectional, sbdrnnnumlayers=args.sbdrnnnumlayers,
+                        posrnnnumlayers=args.posrnnnumlayers, sbdencodertype=args.sbdencodertype,
+                        posencodertype=args.posencodertype
+                        , learningrate=args.lr, batchsize=args.trainbatch, sequencelength=args.seqlen,
+                        dropout=args.dropout, wordropout=args.worddropout, lockeddropout=args.lockeddropout,datatype=args.datatype)
+
+    else:
+        tagger = Tagger(trainflag=True, trainfile=htbtrain, devfile=htbdev, sbdrnndim=args.sbdrnndim,sbdfflayerdim=args.sbdfflayerdim,
+                        posrnndim=args.posrnndim, posfflayerdim=args.posfflayerdim,sbdrnnbidirectional=args.sbdrnnbidirectional,
+                        posrnnbidirectional=args.posrnnbidirectional, sbdrnnnumlayers=args.sbdrnnnumlayers,
+                        posrnnnumlayers=args.posrnnnumlayers, sbdencodertype=args.sbdencodertype,
+                        posencodertype=args.posencodertype
+                        , learningrate=args.lr, batchsize=args.trainbatch, sequencelength=args.seqlen,
+                        dropout=args.dropout, wordropout=args.worddropout, lockeddropout=args.lockeddropout,datatype=args.datatype)
 
     tagger.prepare_data_files()
+    #tagger.train(checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/htb_best_sent_pos_model_13.316283_0.979424_0.98009.pt')
     tagger.train()
 
 

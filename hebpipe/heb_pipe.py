@@ -13,6 +13,9 @@ from stanza.models.common.doc import Document
 import torch
 
 from time import time
+import cProfile
+import pstats
+
 
 from rftokenizer import RFTokenizer
 try:  # Module usage
@@ -598,18 +601,16 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         if from_pipes:
             input_data = input_data.replace("|","")
 
-        #start = time.time()
-        mtltagger = Tagger(trainflag=False)
-        #print ('mtl init')
-        #print (time.time() - start)
+        # Wiki
+        mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=512,posrnndim=512,sbdfflayerdim=512)
+        # HTB
+        #mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=320,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
 
 
         if preloaded is not None:
+
             rf_tok, xrenner, flair_sent_splitter, parser, tagger, morpher, lemmatizer = preloaded
         else:
-
-
-
             rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
             xrenner = Xrenner(model=model_dir + "heb.xrm")
 
@@ -676,8 +677,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         """
 
         sent_tag = 's'
-        start = time()
-        tagged_conllu, tokenized = mtltagger.split_pos(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/best_sent_pos_model_12.603806_0.866864_0.971045.pt')
+        tagged_conllu, tokenized = mtltagger.split_pos(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/top_wiki_best_sent_pos_model_17.477738_0.857963_0.972323.pt')
         pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
 
         del mtltagger
