@@ -603,6 +603,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
         # Wiki
         mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=512,posrnndim=512,sbdfflayerdim=512)
+
         # HTB
         #mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=320,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
 

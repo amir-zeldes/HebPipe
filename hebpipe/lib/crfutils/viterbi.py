@@ -5,8 +5,6 @@ import torch
 import torch.nn
 from torch.nn.functional import softmax
 from torch.nn.utils.rnn import pack_padded_sequence
-
-import flair
 from flair.data import Dictionary, Label, List, Sentence
 
 START_TAG: str = "<START>"
@@ -28,6 +26,9 @@ class ViterbiLoss(torch.nn.Module):
         self.start_tag = tag_dictionary.get_idx_for_item(START_TAG)
         self.stop_tag = tag_dictionary.get_idx_for_item(STOP_TAG)
 
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
     def forward(self, features_tuple: tuple, targets: torch.Tensor) -> torch.Tensor:
         """
         Forward propagation of Viterbi Loss
@@ -42,7 +43,7 @@ class ViterbiLoss(torch.nn.Module):
         seq_len = features.size(1)
 
         targets, targets_matrix_indices = self._format_targets(targets, lengths)
-        targets_matrix_indices = torch.tensor(targets_matrix_indices, dtype=torch.long).unsqueeze(2).to(flair.device)
+        targets_matrix_indices = torch.tensor(targets_matrix_indices, dtype=torch.long).unsqueeze(2).to(self.device)
 
         # scores_at_targets[range(features.shape[0]), lengths.values -1]
         # Squeeze crf scores matrices in 1-dim shape and gather scores at targets by matrix indices
@@ -54,7 +55,7 @@ class ViterbiLoss(torch.nn.Module):
         ]
         gold_score = scores_at_targets.sum() + transitions_to_stop.sum()
 
-        scores_upto_t = torch.zeros(batch_size, self.tagset_size, device=flair.device)
+        scores_upto_t = torch.zeros(batch_size, self.tagset_size, device=self.device)
 
         for t in range(max(lengths)):
             batch_size_t = sum(
@@ -137,6 +138,9 @@ class ViterbiDecoder:
         self.start_tag = tag_dictionary.get_idx_for_item(START_TAG)
         self.stop_tag = tag_dictionary.get_idx_for_item(STOP_TAG)
 
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
     def decode(
         self, features_tuple: tuple, probabilities_for_all_classes: bool, sentences: List[Sentence]
     ) -> Tuple[List, List]:
@@ -154,12 +158,12 @@ class ViterbiDecoder:
         seq_len = features.size(1)
 
         # Create a tensor to hold accumulated sequence scores at each current tag
-        scores_upto_t = torch.zeros(batch_size, seq_len + 1, self.tagset_size).to(flair.device)
+        scores_upto_t = torch.zeros(batch_size, seq_len + 1, self.tagset_size).to(self.device)
         # Create a tensor to hold back-pointers
         # i.e., indices of the previous_tag that corresponds to maximum accumulated score at current tag
         # Let pads be the <end> tag index, since that was the last tag in the decoded sequence
         backpointers = (
-            torch.ones((batch_size, seq_len + 1, self.tagset_size), dtype=torch.long, device=flair.device)
+            torch.ones((batch_size, seq_len + 1, self.tagset_size), dtype=torch.long, device=self.device)
             * self.stop_tag
         )
 
@@ -186,8 +190,8 @@ class ViterbiDecoder:
                 )
 
         # Decode/trace best path backwards
-        decoded = torch.zeros((batch_size, backpointers.size(1)), dtype=torch.long, device=flair.device)
-        pointer = torch.ones((batch_size, 1), dtype=torch.long, device=flair.device) * self.stop_tag
+        decoded = torch.zeros((batch_size, backpointers.size(1)), dtype=torch.long, device=self.device)
+        pointer = torch.ones((batch_size, 1), dtype=torch.long, device=self.device) * self.stop_tag
 
         for t in list(reversed(range(backpointers.size(1)))):
             decoded[:, t] = torch.gather(backpointers[:, t, :], 1, pointer).squeeze(1)
@@ -195,7 +199,7 @@ class ViterbiDecoder:
 
         # Sanity check
         assert torch.equal(
-            decoded[:, 0], torch.ones((batch_size), dtype=torch.long, device=flair.device) * self.start_tag
+            decoded[:, 0], torch.ones((batch_size), dtype=torch.long, device=self.device) * self.start_tag
         )
 
         # remove start-tag and backscore to stop-tag

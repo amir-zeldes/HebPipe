@@ -166,12 +166,11 @@ class MTLModel(nn.Module):
             elif 'weight' in name:
                 nn.init.xavier_normal_(param)
 
-        #self.sigmoid = nn.Sigmoid()
         self.dropout = nn.Dropout(dropout)
         self.worddropout = WordDropout(wordropout)
         self.lockeddropout = LockedDropout(lockeddropout)
 
-        self.poscrf = CRF(self.postagsetcrf,len(self.postagsetcrf),init_from_state_dict=False) # TODO: parameterize
+        self.poscrf = CRF(self.postagsetcrf,len(self.postagsetcrf),init_from_state_dict=False).to(self.device) # TODO: parameterize
         self.viterbidecoder = ViterbiDecoder(self.postagsetcrf)
 
         for name, param in self.poscrf.named_parameters():
@@ -292,9 +291,6 @@ class MTLModel(nn.Module):
             scalarsum = torch.add(scalarsum,hiddenstates[i],alpha=1)
 
         embeddings = torch.div(scalarsum,self.lastn)
-        #embeddings = embeddings.to(self.device)
-
-        #embeddings = embeddings[0]
         #embeddings = embeddings.to(self.device)
 
         """
