@@ -602,10 +602,10 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
             input_data = input_data.replace("|","")
 
         # Wiki
-        mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=512,posrnndim=512,sbdfflayerdim=512)
+        mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
 
         # HTB
-        #mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=320,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
+        #mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
 
 
         if preloaded is not None:
@@ -678,7 +678,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         """
 
         sent_tag = 's'
-        tagged_conllu, tokenized = mtltagger.split_pos(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/top_wiki_best_sent_pos_model_17.477738_0.857963_0.972323.pt')
+        tagged_conllu, tokenized = mtltagger.split_pos(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/top_wiki_best_sent_pos_model_18.45584_0.883117_0.971578.pt')
         pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
 
         del mtltagger
