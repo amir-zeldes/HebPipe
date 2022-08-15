@@ -27,7 +27,7 @@ try:  # Module usage
     from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
     from .lib.flair_sent_splitter import FlairSentSplitter
     from .lib.flair_pos_tagger import FlairTagger
-    from .lib.multitask_sentsplitter_postagger import Tagger
+    from .lib.mtlmodel import Tagger
 except ImportError:  # direct script usage
     from lib.xrenner import Xrenner
     from lib._version import __version__
@@ -37,7 +37,7 @@ except ImportError:  # direct script usage
     from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
     from lib.flair_sent_splitter import FlairSentSplitter
     from lib.flair_pos_tagger import FlairTagger
-    from lib.multitask_sentsplitter_postagger import Tagger
+    from lib.mtlmodel import Tagger
 
 PY3 = sys.version_info[0] > 2
 
