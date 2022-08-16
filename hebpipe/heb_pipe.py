@@ -609,21 +609,11 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
 
         if preloaded is not None:
-
-            rf_tok, xrenner, flair_sent_splitter, parser, tagger, morpher, lemmatizer = preloaded
+            rf_tok, xrenner, _, parser, _, _, lemmatizer = preloaded
         else:
             rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
             xrenner = Xrenner(model=model_dir + "heb.xrm")
-
-            """
-            if sent_tag == "auto" and not punct_sentencer:
-                flair_sent_splitter = FlairSentSplitter(model_path=model_dir + "heb.sent")
-            else:
-                flair_sent_splitter = None
-            """
             parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
-            #tagger = None if not do_tag else FlairTagger()
-            morpher = None if not do_tag else FlairTagger(morph=True)
             lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
 
         if do_whitespace:
@@ -678,13 +668,26 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         """
 
         sent_tag = 's'
-        tagged_conllu, tokenized = mtltagger.split_pos(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/top_wiki_best_sent_pos_model_18.45584_0.883117_0.971578.pt')
-        pos_tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
+        tagged_conllu, tokenized, morphs, words  = mtltagger.predict(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/wiki_best_sent_pos_model_19.233182_0.864943_0.971897_0.710666.pt')
 
         del mtltagger
         del rf_tok
         torch.cuda.empty_cache()
 
+        zeros = ["0" for i in range(len(morphs))]
+        zero_conllu = inject_col(zeros, tagged_conllu, into_col=6, skip_supertoks=True)
+        lemmas = lemmatize(lemmatizer, zero_conllu, morphs)
+        tagged = inject_col(tagged_conllu, tokenized, 4)
+
+        if do_lemma:
+            lemmatized = inject_col(lemmas, tagged, -1)
+        else:
+            lemmatized = tagged
+
+        morphs = postprocess_morph(morphs, words, lemmas)
+        morphed = inject_col(morphs, lemmatized, -1)
+
+        """
         if do_tag:
 
             #morpher = None
@@ -735,34 +738,31 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
             morphs = postprocess_morph(morphs, words, lemmas)
             morphed = inject_col(morphs,lemmatized,-1)
+        """
 
-            if not do_parse:
-                if out_mode == "conllu":
-                    conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                         attrs_as_comments=True)
-                    conllized = add_space_after(input_data,conllized)
-                    return conllized
-                else:
-                    if not PY3:
-                        morphed = morphed.decode("utf8")
-                    return morphed
-
-        else:
+        if not do_parse:
             if out_mode == "conllu":
-                conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
                                      attrs_as_comments=True)
-                conllized = add_space_after(input_data, conllized)
+                conllized = add_space_after(input_data,conllized)
                 return conllized
             else:
-                return tokenized
+                if not PY3:
+                    morphed = morphed.decode("utf8")
+                return morphed
 
-        if do_parse:
-            if filecount == 1:
-                # Free up GPU memory if no more files need it
-                del morpher
-                del tagger
-                torch.cuda.empty_cache()
+            """
+            else:
+                if out_mode == "conllu":
+                    conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                         attrs_as_comments=True)
+                    conllized = add_space_after(input_data, conllized)
+                    return conllized
+                else:
+                    return tokenized
+            """
 
+        else:
             conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
                                  attrs_as_comments=True, ten_cols=True)
             parsed = diaparse(parser, conllized)
@@ -781,15 +781,6 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
             else:
                 parsed = add_space_after(input_data,parsed)
                 return parsed
-        else:
-            if out_mode == "conllu":
-                conllized = conllize(tagged, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                     attrs_as_comments=True)
-                conllized = add_space_after(input_data, conllized)
-                return conllized
-            else:
-                return tagged
-
 
 def run_hebpipe():
 
@@ -891,7 +882,8 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
                 sys.exit(0)
         #tagger = FlairTagger()
         tagger = None
-        morpher = FlairTagger(morph=True)
+        #morpher = FlairTagger(morph=True)
+        morpher = None
         lemmatizer = init_lemmatizer(cpu=opts.cpu, no_post_process=opts.disable_lex)
     else:
         tagger = None

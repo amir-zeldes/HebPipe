@@ -43,7 +43,7 @@ class UDSpan:
 
 
 class MTLModel(nn.Module):
-    def __init__(self,sbdrnndim=128,posmorphrnndim=256,sbdrnnnumlayers=1,posmorphrnnnumlayers=1,posmorphfflayerdim=512,sbdrnnbidirectional=True,posmorphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posmorphencodertype='lstm',batchsize=16,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
+    def __init__(self,sbdrnndim=128,posrnndim=256,morphrnndim=256,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=16,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -60,6 +60,7 @@ class MTLModel(nn.Module):
         self.postagsetcrf.add_item("<START>")
         self.postagsetcrf.add_item("<STOP>")
 
+        """
         # FEATS dictionary
         # IMPORTANT: This should be sorted by key
         self.featstagset = {'Abbr=Yes':0, 'Aspect=Prog':1, 'Case=Acc':2, 'Case=Gen':3, 'Definite=Com':4, 'Definite=Cons':5, 'Definite=Def':6, 'Definite=Ind':7, 'Definite=Spec':8,
@@ -70,8 +71,15 @@ class MTLModel(nn.Module):
                             'PronType=Emp':35, 'PronType=Ind':36, 'PronType=Int':37, 'PronType=Prs':38, 'Reflex=Yes':39, 'Tense=Fut':40, 'Tense=Past':41, 'Tense=Pres':42,
                             'Typo=Yes':43, 'VerbForm=Inf':44, 'VerbForm=Part':45, 'VerbType=Cop':46, 'VerbType=Mod':47, 'Voice=Act':48, 'Voice=Mid':49, 'Voice=Pass':50}
 
-        self.idxtofeatstagset = {v:k for k,v in self.featstagset.items()}
+        """
 
+        # {"Gender","Number","Tense","VerbForm","Voice","HebBinyan","Definite"}
+
+        self.featstagset = {'Definite=Com':0, 'Definite=Cons':1, 'Definite=Def':2, 'Definite=Ind':3, 'Definite=Spec':4,
+                            'Gender=Fem':5, 'Gender=Masc':6, 'HebBinyan=HIFIL':7, 'HebBinyan=HITPAEL':8, 'HebBinyan=HUFAL':9, 'HebBinyan=NIFAL':10,
+                            'HebBinyan=NITPAEL':11, 'HebBinyan=PAAL':12, 'HebBinyan=PIEL':13, 'HebBinyan=PUAL':14, 'Number=Dual':15, 'Number=Plur':16, 'Number=Sing':17,
+                            'Tense=Fut':18, 'Tense=Past':19, 'Tense=Pres':20,'VerbForm=Inf':21, 'VerbForm=Part':22,'Voice=Act':23, 'Voice=Mid':24, 'Voice=Pass':25}
+        self.idxtofeatstagset = {v: k for k, v in self.featstagset.items()}
         # shared hyper-parameters
         self.sequence_length = sequencelength
         self.batch_size = batchsize
@@ -92,9 +100,14 @@ class MTLModel(nn.Module):
         self.sbdrnnbidirectional = sbdrnnbidirectional
 
         #Bi-LSTM Encoder for POS tagging
-        self.posmorphrnndim = posmorphrnndim
-        self.posmorphrnnnumlayers = posmorphrnnnumlayers
-        self.posmorphrnnbidirectional = posmorphrnnbidirectional
+        self.posrnndim = posrnndim
+        self.posrnnnumlayers = posrnnnumlayers
+        self.posrnnbidirectional = posrnnbidirectional
+
+        # Encoder for feats
+        self.morphrnndim = morphrnndim
+        self.morphrnnnumlayers = morphrnnnumlayers
+        self.morphrnnbidirectional = morphrnnbidirectional
 
         if sbdencodertype == 'lstm':
             self.sbdencoder = nn.LSTM(input_size=self.embeddingdim, hidden_size=self.sbdrnndim // 2,
@@ -115,17 +128,17 @@ class MTLModel(nn.Module):
             except ValueError as ex:
                 nn.init.constant_(param,0.0)
 
-        if posmorphencodertype == 'lstm':
-            self.posmorphencoder = nn.LSTM(input_size=self.embeddingdim + 5, hidden_size=self.posmorphrnndim // 2,
-                                 num_layers=self.posmorphrnnnumlayers, bidirectional=self.posmorphrnnbidirectional,
+        if posencodertype == 'lstm':
+            self.posencoder = nn.LSTM(input_size=self.embeddingdim +  len(self.supertokenset) + 1, hidden_size=self.posrnndim // 2,
+                                 num_layers=self.posrnnnumlayers, bidirectional=self.posrnnbidirectional,
                                  batch_first=True).to(self.device)
-        elif posmorphencodertype == 'gru':
-            self.posmorphencoder = nn.GRU(input_size=self.embeddingdim + 5, hidden_size=self.posmorphrnndim // 2,
-                                   num_layers=self.posmorphrnnnumlayers, bidirectional=self.posmorphrnnbidirectional,
+        elif posencodertype == 'gru':
+            self.posencoder = nn.GRU(input_size=self.embeddingdim +  len(self.supertokenset) + 1 , hidden_size=self.posrnndim // 2,
+                                   num_layers=self.posrnnnumlayers, bidirectional=self.posrnnbidirectional,
                                    batch_first=True).to(self.device)
 
         # param init
-        for name, param in self.posmorphencoder.named_parameters():
+        for name, param in self.posencoder.named_parameters():
             try:
                 if 'bias' in name:
                     nn.init.constant_(param, 0.0)
@@ -133,6 +146,26 @@ class MTLModel(nn.Module):
                     nn.init.xavier_uniform_(param)
             except ValueError as ex:
                 nn.init.constant_(param, 0.0)
+
+        if morphencodertype == 'lstm':
+            self.morphencoder = nn.LSTM(input_size=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1, hidden_size=self.morphrnndim // 2,
+                                 num_layers=self.morphrnnnumlayers, bidirectional=self.morphrnnbidirectional,
+                                 batch_first=True).to(self.device)
+        elif morphencodertype == 'gru':
+            self.morphencoder = nn.GRU(input_size=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1, hidden_size=self.morphrnndim // 2,
+                                   num_layers=self.morphrnnnumlayers, bidirectional=self.morphrnnbidirectional,
+                                   batch_first=True).to(self.device)
+
+        # param init
+        for name, param in self.morphencoder.named_parameters():
+            try:
+                if 'bias' in name:
+                    nn.init.constant_(param, 0.0)
+                elif 'weight' in name:
+                    nn.init.xavier_uniform_(param)
+            except ValueError as ex:
+                nn.init.constant_(param, 0.0)
+
 
         self.relu = nn.ReLU()
 
@@ -149,19 +182,32 @@ class MTLModel(nn.Module):
                 nn.init.xavier_normal_(param)
 
         # Intermediate feedforward layer
-        self.posmorphembedding2nn = nn.Linear(in_features=self.embeddingdim  + 5,out_features=self.embeddingdim  + 5).to(self.device)
-        self.posmorphfflayerdim = posmorphfflayerdim
-        self.posmorphfflayer = nn.Linear(in_features=self.posmorphrnndim, out_features=self.posmorphfflayerdim).to(self.device)
+        self.posembedding2nn = nn.Linear(in_features=self.embeddingdim + len(self.supertokenset) + 1,out_features=self.embeddingdim  +  len(self.supertokenset) + 1 ).to(self.device)
+        self.posfflayerdim = posfflayerdim
+        self.posfflayer = nn.Linear(in_features=self.posrnndim, out_features=self.posfflayerdim).to(self.device)
 
         # param init
-        for name, param in self.posmorphembedding2nn.named_parameters():
+        for name, param in self.posembedding2nn.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal_(param)
+
+        # Intermediate feedforward layer
+        self.morphembedding2nn = nn.Linear(in_features=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1 ,
+                                         out_features=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1).to(self.device)
+        self.morphfflayerdim = morphfflayerdim
+        self.morphfflayer = nn.Linear(in_features=self.morphrnndim, out_features=self.morphfflayerdim).to(self.device)
+
+        # param init
+        for name, param in self.morphembedding2nn.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
             elif 'weight' in name:
                 nn.init.xavier_normal_(param)
 
         # Label space for the pos tagger
-        self.hidden2postag = nn.Linear(in_features=self.posmorphfflayerdim,out_features=len(self.postagsetcrf)).to(self.device)
+        self.hidden2postag = nn.Linear(in_features=self.posfflayerdim,out_features=len(self.postagsetcrf)).to(self.device)
         for name, param in self.hidden2postag.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
@@ -179,7 +225,7 @@ class MTLModel(nn.Module):
 
 
         # label space for morph feats
-        self.hidden2feats = nn.Linear(in_features=self.posmorphfflayerdim,out_features=len(self.featstagset)).to(self.device)
+        self.hidden2feats = nn.Linear(in_features=self.morphfflayerdim,out_features=len(self.featstagset)).to(self.device)
         for name, param in self.hidden2feats.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
@@ -200,9 +246,6 @@ class MTLModel(nn.Module):
                 nn.init.xavier_normal_(param)
 
         self.stride_size = 10
-        self.sbdencodertype = sbdencodertype
-        self.posmorphencodertype = posmorphencodertype
-
         self.sigmoid = nn.Sigmoid()
 
     def shingle(self,toks,labels=None):
@@ -287,10 +330,12 @@ class MTLModel(nn.Module):
                             key = f.split('=')[0]
                             value = f.split('=')[1]
                             if ',' not in value:
+                                if f not in self.featstagset.keys(): continue
                                 tempfeats[self.featstagset[f]] = 1
                             else:
                                 value = value.split(',')
                                 for v in value:
+                                    if key + '=' + v not in self.featstagset.keys(): continue
                                     tempfeats[self.featstagset[key + '=' + v]] = 1
 
                     featsrecord.append(tempfeats)
@@ -318,10 +363,12 @@ class MTLModel(nn.Module):
                         key = f.split('=')[0]
                         value = f.split('=')[1]
                         if ',' not in value:
+                            if f not in self.featstagset.keys(): continue
                             tempfeats[self.featstagset[f]] = 1
                         else:
                             value = value.split(',')
                             for v in value:
+                                if key + '=' + v not in self.featstagset.keys(): continue
                                 tempfeats[self.featstagset[key + '=' + v]] = 1
 
                 featslabels.append(tempfeats)
@@ -460,23 +507,15 @@ class MTLModel(nn.Module):
             supertokenlabels = torch.unsqueeze(supertokenlabels,dim=0)
 
         # Add the SBD predictions to the POS Encoder Input!
-        posmorphembeddings = torch.cat((avgembeddings,sbdpreds,supertokenlabels),dim=2)
+        posembeddings = torch.cat((avgembeddings,sbdpreds,supertokenlabels),dim=2)
 
-        if mode in ('dev','test'):
-            # Squeeze these to return to the Trainer for scores, now that we are done with them
-            sbdpreds = torch.squeeze(sbdpreds,dim=2)
-            sbdpreds = torch.squeeze(sbdpreds, dim=0)
-            sbdpreds = sbdpreds.tolist()
-        else:
-            sbdpreds = None
+        posembeddings = self.dropout(posembeddings)
+        posembeddings = self.worddropout(posembeddings)
+        posembeddings = self.lockeddropout(posembeddings)
+        posembeddings = self.posembedding2nn(posembeddings)
 
-        posmorphembeddings = self.dropout(posmorphembeddings)
-        posmorphembeddings = self.worddropout(posmorphembeddings)
-        posmorphembeddings = self.lockeddropout(posmorphembeddings)
-        posmorphembeddings = self.posmorphembedding2nn(posmorphembeddings)
-
-        feats,_ = self.posmorphencoder(posmorphembeddings)
-        feats = self.posmorphfflayer(feats)
+        feats,_ = self.posencoder(posembeddings)
+        feats = self.posfflayer(feats)
         feats = self.relu(feats)
         feats = self.dropout(feats)
         feats = self.lockeddropout(feats)
@@ -485,15 +524,64 @@ class MTLModel(nn.Module):
         poslogits = self.hidden2postag(feats)
         poslogits = self.poscrf(poslogits)
 
+        # get the pos CRF predictions
+        if mode == 'train':
+            lengths = [self.sequence_length] * self.batch_size
+        else:
+            lengths = [self.sequence_length]
+        scores = (poslogits, lengths, self.poscrf.transitions)
+        sents = []
+        for s in sentences:
+            sents.append(Sentence(' '.join(s),use_tokenizer=False))
+
+        pospreds = self.viterbidecoder.decode(scores, False, sents)
+        pospreds = [[self.postagsetcrf.get_idx_for_item(p[0])for p in pr] for pr in pospreds[0]]
+        pospredsonehot = []
+        for pred in pospreds:
+            preds = []
+            for p in pred:
+                onehot = [0] * len(self.postagset.keys())
+                onehot[p-1] = 1
+                preds.append(onehot)
+            pospredsonehot.append(preds)
+
+        pospredsonehot = torch.LongTensor(pospredsonehot)
+        pospredsonehot = pospredsonehot.to(self.device)
+
+        morphembeddings = torch.cat((avgembeddings, sbdpreds, supertokenlabels,pospredsonehot), dim=2)
+        morphembeddings = self.dropout(morphembeddings)
+        morphembeddings = self.worddropout(morphembeddings)
+        morphembeddings = self.lockeddropout(morphembeddings)
+        morphembeddings = self.morphembedding2nn(morphembeddings)
+
+        feats, _ = self.morphencoder(morphembeddings)
+        feats = self.morphfflayer(feats)
+        feats = self.relu(feats)
+        feats = self.dropout(feats)
+        feats = self.lockeddropout(feats)
+
         # logits for morphs
         featslogits = self.hidden2feats(feats)
 
-        return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels, featslogits,featslabels # returns the logits and labels
+        if mode in ('dev','test'):
+            # Squeeze these to return to the Trainer for scores, now that we are done with them
+            sbdpreds = torch.squeeze(sbdpreds,dim=2)
+            sbdpreds = torch.squeeze(sbdpreds, dim=0)
+            sbdpreds = sbdpreds.tolist()
+
+            # Unroll the pos predictions
+            pospreds = [p for pred in pospreds for p in pred]
+
+        else:
+            sbdpreds = None
+            pospreds = None
+
+        return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels, pospreds, featslogits,featslabels # returns the logits and labels
 
 class Tagger():
     def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=128,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=256,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
 
-        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posmorphrnndim=posrnndim,posmorphrnnbidirectional=posrnnbidirectional,posmorphencodertype=posencodertype,posmorphrnnnumlayers=posrnnnumlayers,posmorphfflayerdim=posfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
+        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
 
         if trainflag == True:
 
@@ -533,12 +621,13 @@ class Tagger():
         self.featsloss.to(self.device)
 
         self.optimizer = torch.optim.AdamW(list(self.mtlmodel.sbdencoder.parameters()) +  list(self.mtlmodel.sbdembedding2nn.parameters()) +
-                                           list(self.mtlmodel.hidden2sbd.parameters()) + list(self.mtlmodel.posmorphencoder.parameters()) + list(self.mtlmodel.posmorphembedding2nn.parameters())
+                                           list(self.mtlmodel.hidden2sbd.parameters()) + list(self.mtlmodel.posencoder.parameters()) + list(self.mtlmodel.posembedding2nn.parameters())
                                            + list(self.mtlmodel.hidden2postag.parameters()) + list(self.mtlmodel.poscrf.parameters())
-                                           + list(self.mtlmodel.hidden2feats.parameters()), lr=learningrate)
+                                           + list(self.mtlmodel.hidden2feats.parameters()) + list(self.mtlmodel.morphfflayer.parameters()) + list(self.mtlmodel.morphembedding2nn.parameters()) + list(self.mtlmodel.morphencoder.parameters())
+                                           + list(self.mtlmodel.posfflayer.parameters()) + list(self.mtlmodel.sbdfflayer.parameters()), lr=learningrate)
 
         self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer,base_lr=learningrate/10,max_lr=learningrate,step_size_up=250,cycle_momentum=False)
-        self.evalstep = 1
+        self.evalstep = 50
 
         self.sigmoidthreshold = 0.5
 
@@ -610,7 +699,7 @@ class Tagger():
             data = [datum for datum in data if len(datum) == self.mtlmodel.sequence_length]
             self.mtlmodel.batch_size = len(data)
 
-            sbdlogits, sbdlabels, _, poslogits,poslabels, featslogits, featslabels = self.mtlmodel(data)
+            sbdlogits, sbdlabels, _, poslogits, poslabels, _ , featslogits, featslabels = self.mtlmodel(data)
 
             sbdtags = torch.LongTensor(sbdlabels).to(self.device)
             sbdlogits = sbdlogits.permute(0,2,1)
@@ -662,7 +751,7 @@ class Tagger():
                     allfeatspreds = []
 
                     # because of shingling for SBD, the dev data needs to be split in slices for inference, as GPU may run out of memory with shingles on the full token list.
-                    # shingling and SBD prediction is done on the individual slice, as well as POS tag predictions.
+                    # shingling and SBD prediction is done on the individual slice, as well as POS tag predictions and feats.
                     # TODO This naturally increases prediction time...but can't think of a better way.
                     for slice in devdata:
 
@@ -670,25 +759,15 @@ class Tagger():
                         if len(slice) != self.mtlmodel.sequence_length: # this will happen in one case, for the last slice in the dev batch
                             self.mtlmodel.sequence_length = len(slice)
 
-                        # Flair CRF decoding uses the Sentence object..
-                        sentence = ' '.join([s.split('\t')[0].strip() for s in slice])
-                        sentence = Sentence(sentence,use_tokenizer=False)
-
+                        # Extract gold labels
                         goldsbdlabels = [s.split('\t')[2].strip() for s in slice]
                         goldsbdlabels = [self.mtlmodel.sbd_tag2idx[s] for s in goldsbdlabels]
                         goldposlabels = [s.split('\t')[1].strip() for s in slice]
                         goldposlabels = [self.mtlmodel.postagsetcrf.get_idx_for_item(s) for s in goldposlabels]
                         goldfeatslabels = [s.split('\t')[4].strip() for s in slice]
 
-                        # sbdpreds already contains the sbd predictions. These were necessary for input to the POS encoder.
-                        sbdlogits, sbdlabels, sbdpreds, poslogits, poslabels, featslogits, featslabels = self.mtlmodel(slice,mode='dev')
-
-                        # get the pos predictions
-                        lengths = [self.mtlmodel.sequence_length]
-                        lengths = torch.LongTensor(lengths).to(self.device)
-                        scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
-                        pospreds = self.mtlmodel.viterbidecoder.decode(scores,False,[sentence])
-                        pospreds = [self.mtlmodel.postagsetcrf.get_idx_for_item(p[0]) for pr in pospreds[0] for p in pr]
+                        # RUn through the model and get the labels and logits (and preds for stepwise models)
+                        sbdlogits, sbdlabels, sbdpreds, poslogits, poslabels, pospreds, featslogits, featslabels = self.mtlmodel(slice,mode='dev')
 
                         # get the feats predictions
                         featspreds = self.mtlmodel.sigmoid(featslogits)
@@ -703,6 +782,9 @@ class Tagger():
                         # get the pos loss
                         postags = torch.LongTensor(poslabels)
                         postags = postags.to(self.device)
+                        lengths = [self.mtlmodel.sequence_length]
+                        lengths = torch.LongTensor(lengths).to(self.device)
+                        scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
                         posdevloss = self.postagloss(scores,postags).item()
 
                         # get the feats loss
@@ -711,6 +793,7 @@ class Tagger():
                         featstags = torch.unsqueeze(featstags,dim=0)
                         featsdevloss = self.featsloss(featslogits,featstags).item()
 
+                        # add up the losses across the slices for the avg
                         totalsbddevloss += sbddevloss
                         totalposdevloss += posdevloss
                         totalfeatsdevloss += featsdevloss
@@ -721,9 +804,6 @@ class Tagger():
                             featsstr = ''
                             for i in range(0,len(preds)):
                                 if preds[i] != 0:
-                                    #if i == 0:
-                                    #    featsstr += self.mtlmodel.idxtofeatstagset[i]
-                                    #else:
                                     if self.mtlmodel.idxtofeatstagset[i].split('=')[0] == featsstr.split('|')[-1].split('=')[0]:
                                         featsstr += ',' + self.mtlmodel.idxtofeatstagset[i].split('=')[1]
                                     else:
@@ -734,6 +814,7 @@ class Tagger():
 
                             featsslicepreds.append(featsstr)
 
+                        # build the gold and predictions for the entire dev set
                         allsbdpreds.extend(sbdpreds)
                         allsbdgold.extend(goldsbdlabels)
                         allpospreds.extend(pospreds)
@@ -746,6 +827,7 @@ class Tagger():
                     if self.mtlmodel.sequence_length != old_seqlen:
                         self.mtlmodel.sequence_length = old_seqlen
 
+                    # Now get the scores
                     goldspans = []
                     predspans = []
                     goldstartindex = 0
@@ -767,6 +849,7 @@ class Tagger():
                     correctfeats = sum([1 if p == g else 0 for p,g in zip(allfeatspreds,allfeatsgold)])
                     featsscores = Score(len(allfeatsgold),len(allfeatspreds),correctfeats,len(allfeatspreds))
 
+                    # Write the scores and losses to tensorboard and console
                     mtlloss = (totalsbddevloss + totalposdevloss + totalfeatsdevloss) / len(devdata)
 
                     self.writer.add_scalar("mtl_dev_loss", round(mtlloss, 4),
@@ -806,12 +889,13 @@ class Tagger():
                     print('feats dev recall:' + str(featsscores.recall))
                     print('\n')
 
+                    # save the best model
                     if mtlloss < bestloss:
                         bestloss = mtlloss
-                        bestmodel = self.bestmodel.replace('.pt','_' + str(round(mtlloss,6)) + '_' + str(round(sbdscores.f1,6)) + '_' + str(round(posscores.f1,6)) + '.pt')
+                        bestmodel = self.bestmodel.replace('.pt','_' + str(round(mtlloss,6)) + '_' + str(round(sbdscores.f1,6)) + '_' + str(round(posscores.f1,6)) + '_' + str(round(featsscores.f1,6)) + '.pt')
                         torch.save({'epoch':epoch,'model_state_dict':self.mtlmodel.state_dict(),'optimizer_state_dict':self.optimizer.state_dict(),'poscrf_state_dict':self.mtlmodel.poscrf.state_dict()},bestmodel)
 
-    def predict(self,toks,checkpointfile=None):
+    def inference(self,toks,checkpointfile=None):
 
         def is_tok(sgml_line):
             return len(sgml_line) > 0 and not (sgml_line.startswith("<") and sgml_line.endswith(">"))
@@ -881,33 +965,53 @@ class Tagger():
 
         with torch.no_grad():
 
+            allwords = []
             allsbdpreds = []
             allpospreds = []
+            allfeatspreds = []
 
             for slice in slices:
 
                 if len(slice[0]) != self.mtlmodel.sequence_length:  # this will happen in one case, for the last slice in the batch
                     self.mtlmodel.sequence_length = len(slice[0])
 
-                # Flair CRF decoding uses the Sentence object..
-                sentence = ' '.join([s.split('\t')[0].strip() for s in slice[0]])
-                sentence = Sentence(sentence, use_tokenizer=False)
+                _, _, sbdpreds, _,_,pospreds, featslogits,_ = self.mtlmodel(slice, mode='test')
 
-                _, _, sbdpreds, poslogits, _ = self.mtlmodel(slice, mode='test')
+                # get the feats predictions
+                featspreds = self.mtlmodel.sigmoid(featslogits)
+                featspreds = (featspreds > self.sigmoidthreshold).long()
+                featspreds = torch.squeeze(featspreds).tolist()
+
+                featsslicepreds = []
+                for preds in featspreds:
+                    featsstr = ''
+                    for i in range(0, len(preds)):
+                        if preds[i] != 0:
+                            if self.mtlmodel.idxtofeatstagset[i].split('=')[0] == featsstr.split('|')[-1].split('=')[0]:
+                                featsstr += ',' + self.mtlmodel.idxtofeatstagset[i].split('=')[1]
+                            else:
+                                if featsstr != '':
+                                    featsstr = featsstr + '|' + self.mtlmodel.idxtofeatstagset[i]
+                                else:
+                                    featsstr += self.mtlmodel.idxtofeatstagset[i]
+
+                    featsslicepreds.append(featsstr)
 
                 # get the pos predictions
-                lengths = [self.mtlmodel.sequence_length]
-                lengths = torch.LongTensor(lengths).to(self.device)
-                scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
-                pospreds = self.mtlmodel.viterbidecoder.decode(scores, False, [sentence])
-                pospreds = [self.mtlmodel.postagsetcrf.get_idx_for_item(p[0]) for pr in pospreds[0] for p in pr]
+                #lengths = [self.mtlmodel.sequence_length]
+                #lengths = torch.LongTensor(lengths).to(self.device)
+                #scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
+                #pospreds = self.mtlmodel.viterbidecoder.decode(scores, False, [sentence])
+                #pospreds = [self.mtlmodel.postagsetcrf.get_idx_for_item(p[0]) for pr in pospreds[0] for p in pr]
 
                 allsbdpreds.extend(sbdpreds)
                 allpospreds.extend(pospreds)
+                allfeatspreds.extend(featsslicepreds)
+                allwords.extend([s.split('\t')[0].strip() for s in slice[0]])
 
         allpospreds = [self.mtlmodel.postagsetcrf.get_item_for_index(p) for p in allpospreds]
 
-        return allsbdpreds,allpospreds
+        return allsbdpreds,allpospreds, allfeatspreds, allwords
 
     def prepare_data_files(self):
         """
@@ -977,7 +1081,7 @@ class Tagger():
         with open(file, "r", encoding="utf-8") as f:
             return conllu.parse(f.read(), fields=fields)
 
-    def split_pos(self, xml_data,out_mode='conllu',checkpointfile = None):
+    def predict(self, xml_data,out_mode='conllu',checkpointfile = None):
 
         def is_sgml_tag(line):
             return line.startswith("<") and line.endswith(">")
@@ -1142,7 +1246,7 @@ class Tagger():
 
         # don't feed the sentencer our pos and lemma predictions, if we have them
         no_pos_lemma = re.sub(r"([^\n\t]*?)\t[^\n\t]*?\t[^\n\t]*?\n", r"\1\n", xml_data)
-        split_indices, pos_tags = self.predict(no_pos_lemma,checkpointfile=checkpointfile)
+        split_indices, pos_tags, morphs, words = self.inference(no_pos_lemma,checkpointfile=checkpointfile)
 
         # for xml
         counter = 0
@@ -1232,7 +1336,9 @@ class Tagger():
 
         assert k == len(pos_tags) # Fails means pos tags aren't aligned with tokens
 
-        return "\n".join(output), lines
+        morphs = [m if m != '' else '_' for m in morphs]
+
+        return "\n".join(output), lines, morphs, words
 
     def spans_score(self, gold_spans, system_spans):
         correct, gi, si = 0, 0, 0
