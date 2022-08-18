@@ -43,7 +43,7 @@ class UDSpan:
 
 
 class MTLModel(nn.Module):
-    def __init__(self,sbdrnndim=128,posrnndim=256,morphrnndim=256,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=16,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
+    def __init__(self,sbdrnndim=128,posrnndim=256,morphrnndim=256,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=32,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -72,9 +72,6 @@ class MTLModel(nn.Module):
                             'Typo=Yes':43, 'VerbForm=Inf':44, 'VerbForm=Part':45, 'VerbType=Cop':46, 'VerbType=Mod':47, 'Voice=Act':48, 'Voice=Mid':49, 'Voice=Pass':50}
 
         """
-
-        # {"Gender","Number","Tense","VerbForm","Voice","HebBinyan","Definite"}
-
         self.featstagset = {'Definite=Com':0, 'Definite=Cons':1, 'Definite=Def':2, 'Definite=Ind':3, 'Definite=Spec':4,
                             'Gender=Fem':5, 'Gender=Masc':6, 'HebBinyan=HIFIL':7, 'HebBinyan=HITPAEL':8, 'HebBinyan=HUFAL':9, 'HebBinyan=NIFAL':10,
                             'HebBinyan=NITPAEL':11, 'HebBinyan=PAAL':12, 'HebBinyan=PIEL':13, 'HebBinyan=PUAL':14, 'Number=Dual':15, 'Number=Plur':16, 'Number=Sing':17,
@@ -148,11 +145,11 @@ class MTLModel(nn.Module):
                 nn.init.constant_(param, 0.0)
 
         if morphencodertype == 'lstm':
-            self.morphencoder = nn.LSTM(input_size=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1, hidden_size=self.morphrnndim // 2,
+            self.morphencoder = nn.LSTM(input_size=self.embeddingdim + len(self.postagsetcrf) + len(self.supertokenset) + 1, hidden_size=self.morphrnndim // 2,
                                  num_layers=self.morphrnnnumlayers, bidirectional=self.morphrnnbidirectional,
                                  batch_first=True).to(self.device)
         elif morphencodertype == 'gru':
-            self.morphencoder = nn.GRU(input_size=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1, hidden_size=self.morphrnndim // 2,
+            self.morphencoder = nn.GRU(input_size=self.embeddingdim + len(self.postagsetcrf) + len(self.supertokenset) + 1, hidden_size=self.morphrnndim // 2,
                                    num_layers=self.morphrnnnumlayers, bidirectional=self.morphrnnbidirectional,
                                    batch_first=True).to(self.device)
 
@@ -181,6 +178,13 @@ class MTLModel(nn.Module):
             elif 'weight' in name:
                 nn.init.xavier_normal_(param)
 
+        for name, param in self.sbdfflayer.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal_(param)
+
+
         # Intermediate feedforward layer
         self.posembedding2nn = nn.Linear(in_features=self.embeddingdim + len(self.supertokenset) + 1,out_features=self.embeddingdim  +  len(self.supertokenset) + 1 ).to(self.device)
         self.posfflayerdim = posfflayerdim
@@ -193,14 +197,27 @@ class MTLModel(nn.Module):
             elif 'weight' in name:
                 nn.init.xavier_normal_(param)
 
+        for name, param in self.posfflayer.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal_(param)
+
         # Intermediate feedforward layer
-        self.morphembedding2nn = nn.Linear(in_features=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1 ,
-                                         out_features=self.embeddingdim + len(self.postagset) + len(self.supertokenset) + 1).to(self.device)
+        self.morphembedding2nn = nn.Linear(in_features=self.embeddingdim + len(self.postagsetcrf) + len(self.supertokenset) + 1 ,
+                                         out_features=self.embeddingdim + len(self.postagsetcrf) + len(self.supertokenset) + 1).to(self.device)
         self.morphfflayerdim = morphfflayerdim
         self.morphfflayer = nn.Linear(in_features=self.morphrnndim, out_features=self.morphfflayerdim).to(self.device)
 
         # param init
         for name, param in self.morphembedding2nn.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal_(param)
+
+        # param init
+        for name, param in self.morphfflayer.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
             elif 'weight' in name:
@@ -540,8 +557,8 @@ class MTLModel(nn.Module):
         for pred in pospreds:
             preds = []
             for p in pred:
-                onehot = [0] * len(self.postagset.keys())
-                onehot[p-1] = 1
+                onehot = [0] * len(self.postagsetcrf)
+                onehot[p] = 1
                 preds.append(onehot)
             pospredsonehot.append(preds)
 
@@ -579,9 +596,9 @@ class MTLModel(nn.Module):
         return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels, pospreds, featslogits,featslabels # returns the logits and labels
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=128,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=256,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=128,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=256,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,morphrnndim=256,morphrnnnumlayers=1,morphrnnbidirectional=True,morphfflayerdim=512,morphencodertype='lstm',dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
 
-        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
+        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,morphrnndim=morphrnndim,morphrnnnumlayers=morphrnnnumlayers,morphencodertype=morphencodertype,morphrnnbidirectional=morphrnnbidirectional,morphfflayerdim=morphfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
 
         if trainflag == True:
 
@@ -674,7 +691,7 @@ class Tagger():
 
             return dataset
 
-        epochs = 3500
+        epochs = 5000
         bestloss = float('inf')
 
         trainingdata = read_file()
@@ -996,13 +1013,6 @@ class Tagger():
                                     featsstr += self.mtlmodel.idxtofeatstagset[i]
 
                     featsslicepreds.append(featsstr)
-
-                # get the pos predictions
-                #lengths = [self.mtlmodel.sequence_length]
-                #lengths = torch.LongTensor(lengths).to(self.device)
-                #scores = (poslogits, lengths, self.mtlmodel.poscrf.transitions)
-                #pospreds = self.mtlmodel.viterbidecoder.decode(scores, False, [sentence])
-                #pospreds = [self.mtlmodel.postagsetcrf.get_idx_for_item(p[0]) for pr in pospreds[0] for p in pr]
 
                 allsbdpreds.extend(sbdpreds)
                 allpospreds.extend(pospreds)
@@ -1360,7 +1370,7 @@ def main(): # testing only
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--seqlen', type=int, default=192)
+    parser.add_argument('--seqlen', type=int, default=256)
     parser.add_argument('--trainbatch', type=int, default=16)
     parser.add_argument('--datatype', type=str, default='wiki')
     parser.add_argument('--sbdrnndim', type=int, default=256)
@@ -1380,32 +1390,29 @@ def main(): # testing only
 
     args = parser.parse_args()
 
-    iahltwikitrain = '../he_iahltwiki-ud-train.conllu'
-    iahltwikidev = '../he_iahltwiki-ud-dev.conllu'
-
-    htbdev = '../he_htb-ud-dev.conllu'
-    htbtrain = '../he_htb-ud-train.conllu'
-
     if args.datatype == 'wiki':
-        tagger = Tagger(trainflag=True, trainfile=iahltwikitrain, devfile=iahltwikidev, sbdrnndim=args.sbdrnndim, sbdfflayerdim=args.sbdfflayerdim,
-                        posrnndim=args.posrnndim, posfflayerdim=args.posfflayerdim, sbdrnnbidirectional=args.sbdrnnbidirectional,
-                        posrnnbidirectional=args.posrnnbidirectional, sbdrnnnumlayers=args.sbdrnnnumlayers,
-                        posrnnnumlayers=args.posrnnnumlayers, sbdencodertype=args.sbdencodertype,
-                        posencodertype=args.posencodertype
-                        , learningrate=args.lr, batchsize=args.trainbatch, sequencelength=args.seqlen,
-                        dropout=args.dropout, wordropout=args.worddropout, lockeddropout=args.lockeddropout,datatype=args.datatype)
-
+        trainfile = '../he_iahltwiki-ud-train.conllu'
+        devfile = '../he_iahltwiki-ud-dev.conllu'
     else:
-        tagger = Tagger(trainflag=True, trainfile=htbtrain, devfile=htbdev, sbdrnndim=args.sbdrnndim,sbdfflayerdim=args.sbdfflayerdim,
-                        posrnndim=args.posrnndim, posfflayerdim=args.posfflayerdim,sbdrnnbidirectional=args.sbdrnnbidirectional,
-                        posrnnbidirectional=args.posrnnbidirectional, sbdrnnnumlayers=args.sbdrnnnumlayers,
-                        posrnnnumlayers=args.posrnnnumlayers, sbdencodertype=args.sbdencodertype,
-                        posencodertype=args.posencodertype
-                        , learningrate=args.lr, batchsize=args.trainbatch, sequencelength=args.seqlen,
-                        dropout=args.dropout, wordropout=args.worddropout, lockeddropout=args.lockeddropout,datatype=args.datatype)
+        devfile = '../he_htb-ud-dev.conllu'
+        trainfile = '../he_htb-ud-train.conllu'
+
+    tagger = Tagger(trainflag=True, trainfile=trainfile, devfile=devfile, sbdrnndim=args.sbdrnndim,
+                    sbdfflayerdim=args.sbdfflayerdim,
+                    posrnndim=args.posrnndim, posfflayerdim=args.posfflayerdim,
+                    sbdrnnbidirectional=args.sbdrnnbidirectional,
+                    posrnnbidirectional=args.posrnnbidirectional, sbdrnnnumlayers=args.sbdrnnnumlayers,
+                    posrnnnumlayers=args.posrnnnumlayers, sbdencodertype=args.sbdencodertype,
+                    posencodertype=args.posencodertype,
+                    morphrnnbidirectional=args.morphrnnbidirectional, morphrnndim=args.morphrnndim,
+                    morphfflayerdim=args.morphfflayerdim, morphencodertype=args.morphencodertype,
+                    morphrnnnumlayers=args.morphrnnnumlayers,
+                    learningrate=args.lr, batchsize=args.trainbatch, sequencelength=args.seqlen,
+                    dropout=args.dropout, wordropout=args.worddropout, lockeddropout=args.lockeddropout,
+                    datatype=args.datatype)
 
     tagger.prepare_data_files()
-    #tagger.train(checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/htb_best_sent_pos_model_13.316283_0.979424_0.98009.pt')
+    # tagger.train(checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/htb_best_sent_pos_model_13.316283_0.979424_0.98009.pt')
     tagger.train()
 
 
