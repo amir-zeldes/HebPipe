@@ -43,7 +43,7 @@ class UDSpan:
 
 
 class MTLModel(nn.Module):
-    def __init__(self,sbdrnndim=128,posrnndim=256,morphrnndim=256,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=32,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
+    def __init__(self,sbdrnndim=256,posrnndim=512,morphrnndim=512,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=32,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
         super(MTLModel,self).__init__()
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -596,7 +596,7 @@ class MTLModel(nn.Module):
         return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels, pospreds, featslogits,featslabels # returns the logits and labels
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=128,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=256,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,morphrnndim=256,morphrnnnumlayers=1,morphrnnbidirectional=True,morphfflayerdim=512,morphencodertype='lstm',dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=256,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=512,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,morphrnndim=512,morphrnnnumlayers=1,morphrnnbidirectional=True,morphfflayerdim=512,morphencodertype='lstm',dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
 
         self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,morphrnndim=morphrnndim,morphrnnnumlayers=morphrnnnumlayers,morphencodertype=morphencodertype,morphrnnbidirectional=morphrnnbidirectional,morphfflayerdim=morphfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
 
@@ -615,9 +615,10 @@ class Tagger():
             self.trainingdatafile = '../data/sentsplit_postag_train_gold.tab'
             self.devdatafile = '../data/sentsplit_postag_dev_gold.tab'
 
-            self.bestmodel = bestmodelpath + datatype + '_best_sent_pos_model.pt'
+            self.bestmodel = bestmodelpath + datatype + '_best_mtlmodel.pt'
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 
         self.trainflag = trainflag
         self.trainfile = trainfile
@@ -692,7 +693,7 @@ class Tagger():
             return dataset
 
         epochs = 5000
-        bestloss = float('inf')
+        bestf1 = float('-inf')
 
         trainingdata = read_file()
         devdata = read_file(mode='dev')
@@ -907,8 +908,8 @@ class Tagger():
                     print('\n')
 
                     # save the best model
-                    if mtlloss < bestloss:
-                        bestloss = mtlloss
+                    if (sbdscores.f1 + posscores.f1 + featsscores.f1) / 3 > bestf1:
+                        bestf1 = (sbdscores.f1 + posscores.f1 + featsscores.f1) / 3
                         bestmodel = self.bestmodel.replace('.pt','_' + str(round(mtlloss,6)) + '_' + str(round(sbdscores.f1,6)) + '_' + str(round(posscores.f1,6)) + '_' + str(round(featsscores.f1,6)) + '.pt')
                         torch.save({'epoch':epoch,'model_state_dict':self.mtlmodel.state_dict(),'optimizer_state_dict':self.optimizer.state_dict(),'poscrf_state_dict':self.mtlmodel.poscrf.state_dict()},bestmodel)
 
@@ -1371,18 +1372,23 @@ def main(): # testing only
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--seqlen', type=int, default=256)
-    parser.add_argument('--trainbatch', type=int, default=16)
+    parser.add_argument('--trainbatch', type=int, default=32)
     parser.add_argument('--datatype', type=str, default='wiki')
     parser.add_argument('--sbdrnndim', type=int, default=256)
     parser.add_argument('--posrnndim', type=int, default=512)
+    parser.add_argument('--morphrnndim', type=int, default=512)
     parser.add_argument('--sbdfflayerdim', type=int, default=256)
     parser.add_argument('--posfflayerdim', type=int, default=512)
+    parser.add_argument('--morphfflayerdim', type=int, default=512)
     parser.add_argument('--posrnnbidirectional', type=bool, default=True)
     parser.add_argument('--sbdrnnbidirectional', type=bool, default=True)
+    parser.add_argument('--morphrnnbidirectional', type=bool, default=True)
     parser.add_argument('--posrnnnumlayers', type=int, default=1)
     parser.add_argument('--sbdrnnnumlayers', type=int, default=1)
+    parser.add_argument('--morphrnnnumlayers', type=int, default=1)
     parser.add_argument('--sbdencodertype', type=str, default='lstm')
     parser.add_argument('--posencodertype', type=str, default='lstm')
+    parser.add_argument('--morphencodertype', type=str, default='lstm')
     parser.add_argument('--dropout', type=float, default=0.05)
     parser.add_argument('--worddropout', type=float, default=0.05)
     parser.add_argument('--lockeddropout', type=float, default=0.5)

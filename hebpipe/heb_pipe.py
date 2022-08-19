@@ -12,11 +12,6 @@ import stanza
 from stanza.models.common.doc import Document
 import torch
 
-from time import time
-import cProfile
-import pstats
-
-
 from rftokenizer import RFTokenizer
 try:  # Module usage
     from .lib.xrenner import Xrenner
@@ -601,11 +596,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         if from_pipes:
             input_data = input_data.replace("|","")
 
-        # Wiki
-        mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
-
-        # HTB
-        #mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256,sbdrnndim=256,posrnndim=512,sbdfflayerdim=256)
+        mtltagger = Tagger(trainflag=False,bestmodelpath='data/checkpoint/',sequencelength=256)
 
 
         if preloaded is not None:
@@ -668,7 +659,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         """
 
         sent_tag = 's'
-        tagged_conllu, tokenized, morphs, words  = mtltagger.predict(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/wiki_best_sent_pos_model_19.233182_0.864943_0.971897_0.710666.pt')
+        tagged_conllu, tokenized, morphs, words  = mtltagger.predict(tokenized,checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/top_wiki_best_mtlmodel_38.503373_0.890511_0.972855_0.72344.pt')
 
         del mtltagger
         del rf_tok
