@@ -566,7 +566,7 @@ def check_requirements():
 def download_requirements(models_ok=True):
     urls = []
     if not models_ok:
-        models_base = "http://corpling.uis.georgetown.edu/amir/download/heb_models_v2/"
+        models_base = "http://gucorpling.org/amir/download/heb_models_v2/"
         urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
         urls.append(models_base + "heb.diaparser")
         urls.append(models_base + "heb.sent")
