@@ -661,7 +661,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
     else:
         if out_mode == "conllu":
             conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                 attrs_as_comments=True, ten_cols=True)
+                                 attrs_as_comments=True)
             conllized = add_space_after(input_data,conllized)
             return conllized
         else:
@@ -850,8 +850,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
 if __name__ == "__main__":
     import logging
-    from time import time
     logging.disable(logging.INFO)
-    startpipeline = time()
     run_hebpipe()
 
