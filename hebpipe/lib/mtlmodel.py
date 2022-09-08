@@ -43,10 +43,13 @@ class UDSpan:
 
 
 class MTLModel(nn.Module):
-    def __init__(self,sbdrnndim=256,posrnndim=512,morphrnndim=512,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=32,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5):
+    def __init__(self,sbdrnndim=256,posrnndim=512,morphrnndim=512,sbdrnnnumlayers=1,posrnnnumlayers=1,morphrnnnumlayers=1,posfflayerdim=512,morphfflayerdim=512,sbdrnnbidirectional=True,posrnnbidirectional=True,morphrnnbidirectional=True,sbdencodertype='lstm',sbdfflayerdim=256,posencodertype='lstm',morphencodertype='lstm',batchsize=32,sequencelength=256,dropout=0.0,wordropout=0.05,lockeddropout=0.5,cpu=False):
         super(MTLModel,self).__init__()
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if cpu == False:
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = "cpu"
 
         # tagsets - amend labels here
         self.postagset = {'ADJ':0, 'ADP':1, 'ADV':2, 'AUX':3, 'CCONJ':4, 'DET':5, 'INTJ':6, 'NOUN':7, 'NUM':8, 'PRON':9, 'PROPN':10, 'PUNCT':11, 'SCONJ':12, 'SYM':13, 'VERB':14, 'X':15} # derived from HTB and IAHLTWiki trainsets #TODO: add other UD tags?
@@ -60,18 +63,8 @@ class MTLModel(nn.Module):
         self.postagsetcrf.add_item("<START>")
         self.postagsetcrf.add_item("<STOP>")
 
-        """
         # FEATS dictionary
         # IMPORTANT: This should be sorted by key
-        self.featstagset = {'Abbr=Yes':0, 'Aspect=Prog':1, 'Case=Acc':2, 'Case=Gen':3, 'Definite=Com':4, 'Definite=Cons':5, 'Definite=Def':6, 'Definite=Ind':7, 'Definite=Spec':8,
-                            'Foreign=Yes':9, 'Gender=Fem':10, 'Gender=Masc':11, 'HebBinyan=HIFIL':12, 'HebBinyan=HITPAEL':13, 'HebBinyan=HUFAL':14, 'HebBinyan=NIFAL':15,
-                            'HebBinyan=NITPAEL':16, 'HebBinyan=PAAL':17, 'HebBinyan=PIEL':18, 'HebBinyan=PUAL':19, 'Mood=Imp':20,
-                            'NumType=Card':21, 'NumType=Ord':22, 'Number=Dual':23, 'Number=Plur':24, 'Number=Sing':25, 'Person=1':26,
-                            'Person=2':27, 'Person=3':28, 'Polarity=Neg':29, 'Polarity=Pos':30, 'Poss=Yes':31, 'Prefix=Yes':32, 'PronType=Art':33, 'PronType=Dem':34,
-                            'PronType=Emp':35, 'PronType=Ind':36, 'PronType=Int':37, 'PronType=Prs':38, 'Reflex=Yes':39, 'Tense=Fut':40, 'Tense=Past':41, 'Tense=Pres':42,
-                            'Typo=Yes':43, 'VerbForm=Inf':44, 'VerbForm=Part':45, 'VerbType=Cop':46, 'VerbType=Mod':47, 'Voice=Act':48, 'Voice=Mid':49, 'Voice=Pass':50}
-
-        """
         self.featstagset = {'Definite=Com':0, 'Definite=Cons':1, 'Definite=Def':2, 'Definite=Ind':3, 'Definite=Spec':4,
                             'Gender=Fem':5, 'Gender=Masc':6, 'HebBinyan=HIFIL':7, 'HebBinyan=HITPAEL':8, 'HebBinyan=HUFAL':9, 'HebBinyan=NIFAL':10,
                             'HebBinyan=NITPAEL':11, 'HebBinyan=PAAL':12, 'HebBinyan=PIEL':13, 'HebBinyan=PUAL':14, 'Number=Dual':15, 'Number=Plur':16, 'Number=Sing':17,
@@ -253,8 +246,8 @@ class MTLModel(nn.Module):
         self.worddropout = WordDropout(wordropout)
         self.lockeddropout = LockedDropout(lockeddropout)
 
-        self.poscrf = CRF(self.postagsetcrf,len(self.postagsetcrf),init_from_state_dict=False).to(self.device) # TODO: parameterize
-        self.viterbidecoder = ViterbiDecoder(self.postagsetcrf)
+        self.poscrf = CRF(self.postagsetcrf,len(self.postagsetcrf),init_from_state_dict=False,cpu=cpu).to(self.device) # TODO: parameterize
+        self.viterbidecoder = ViterbiDecoder(self.postagsetcrf,cpu=cpu)
 
         for name, param in self.poscrf.named_parameters():
             if 'bias' in name:
@@ -596,9 +589,9 @@ class MTLModel(nn.Module):
         return sbdlogits, finalsbdlabels, sbdpreds, poslogits, poslabels, pospreds, featslogits,featslabels # returns the logits and labels
 
 class Tagger():
-    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=256,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=512,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,morphrnndim=512,morphrnnnumlayers=1,morphrnnbidirectional=True,morphfflayerdim=512,morphencodertype='lstm',dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb'):
+    def __init__(self,trainflag=False,trainfile=None,devfile=None,testfile=None,sbdrnndim=256,sbdrnnnumlayers=1,sbdrnnbidirectional=True,sbdfflayerdim=256,posrnndim=512,posrnnnumlayers=1,posrnnbidirectional=True,posfflayerdim=512,morphrnndim=512,morphrnnnumlayers=1,morphrnnbidirectional=True,morphfflayerdim=512,morphencodertype='lstm',dropout=0.05,wordropout=0.05,lockeddropout=0.5,sbdencodertype='lstm',posencodertype='lstm',learningrate = 0.001,bestmodelpath='../data/checkpoint/',batchsize=32,sequencelength=256,datatype='htb',cpu=False):
 
-        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,morphrnndim=morphrnndim,morphrnnnumlayers=morphrnnnumlayers,morphencodertype=morphencodertype,morphrnnbidirectional=morphrnnbidirectional,morphfflayerdim=morphfflayerdim,batchsize=batchsize,sequencelength=sequencelength)
+        self.mtlmodel = MTLModel(sbdrnndim=sbdrnndim,sbdrnnnumlayers=sbdrnnnumlayers,sbdrnnbidirectional=sbdrnnbidirectional,sbdencodertype=sbdencodertype,sbdfflayerdim=sbdfflayerdim,dropout=dropout,wordropout=wordropout,lockeddropout=lockeddropout,posrnndim=posrnndim,posrnnbidirectional=posrnnbidirectional,posencodertype=posencodertype,posrnnnumlayers=posrnnnumlayers,posfflayerdim=posfflayerdim,morphrnndim=morphrnndim,morphrnnnumlayers=morphrnnnumlayers,morphencodertype=morphencodertype,morphrnnbidirectional=morphrnnbidirectional,morphfflayerdim=morphfflayerdim,batchsize=batchsize,sequencelength=sequencelength,cpu=cpu)
 
         if trainflag == True:
 
@@ -617,8 +610,10 @@ class Tagger():
 
             self.bestmodel = bestmodelpath + datatype + '_best_mtlmodel.pt'
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+        if cpu == False:
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = "cpu"
 
         self.trainflag = trainflag
         self.trainfile = trainfile
@@ -628,7 +623,7 @@ class Tagger():
         self.learningrate = learningrate
 
         # Loss for pos tagging
-        self.postagloss = ViterbiLoss(self.mtlmodel.postagsetcrf)
+        self.postagloss = ViterbiLoss(self.mtlmodel.postagsetcrf,cpu=cpu)
         self.postagloss.to(self.device)
 
         # Loss for sentence splitting
@@ -913,7 +908,7 @@ class Tagger():
                         bestmodel = self.bestmodel.replace('.pt','_' + str(round(mtlloss,6)) + '_' + str(round(sbdscores.f1,6)) + '_' + str(round(posscores.f1,6)) + '_' + str(round(featsscores.f1,6)) + '.pt')
                         torch.save({'epoch':epoch,'model_state_dict':self.mtlmodel.state_dict(),'optimizer_state_dict':self.optimizer.state_dict(),'poscrf_state_dict':self.mtlmodel.poscrf.state_dict()},bestmodel)
 
-    def inference(self,toks,checkpointfile=None):
+    def inference(self,toks,sent_tag='auto',checkpointfile=None):
 
         def is_tok(sgml_line):
             return len(sgml_line) > 0 and not (sgml_line.startswith("<") and sgml_line.endswith(">"))
@@ -929,6 +924,8 @@ class Tagger():
         slices = []
         toks = unescape(toks)  # Splitter is trained on UTF-8 forms, since LM embeddings know characters like '&'
         lines = toks.strip().split("\n")
+
+        taggedsbdpreds = []
 
         # add super token tags
         supertokenlabels = []
@@ -952,10 +949,18 @@ class Tagger():
                     else:
                         supertokenlabels.append("I")
 
+                if sent_tag != 'auto':
+                    if i != 2 and lines[i - 2] == "<" + sent_tag + ">":
+                        taggedsbdpreds.append(1)
+                    else:
+                        taggedsbdpreds.append(0)
+
         toks = [l for l in lines if is_tok(l)]
         toks = [re.sub(r"\t.*", "", t) for t in toks]
 
         assert len(toks) == len(supertokenlabels)
+        if sent_tag != 'auto':
+            assert len(taggedsbdpreds) == len(toks)
 
         # slice up the token list into slices of seqlen for GPU RAM reasons
         for idx in range(0, len(toks), self.mtlmodel.sequence_length):
@@ -974,7 +979,7 @@ class Tagger():
 
         if checkpointfile is not None:
 
-            checkpoint = torch.load(checkpointfile)
+            checkpoint = torch.load(checkpointfile,map_location=self.device)
             self.mtlmodel.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.mtlmodel.poscrf.load_state_dict(checkpoint['poscrf_state_dict'])
@@ -1021,6 +1026,10 @@ class Tagger():
                 allwords.extend([s.split('\t')[0].strip() for s in slice[0]])
 
         allpospreds = [self.mtlmodel.postagsetcrf.get_item_for_index(p) for p in allpospreds]
+
+
+        if sent_tag != 'auto':
+            allsbdpreds = taggedsbdpreds
 
         return allsbdpreds,allpospreds, allfeatspreds, allwords
 
@@ -1092,7 +1101,7 @@ class Tagger():
         with open(file, "r", encoding="utf-8") as f:
             return conllu.parse(f.read(), fields=fields)
 
-    def predict(self, xml_data,out_mode='conllu',checkpointfile = None):
+    def predict(self, xml_data,out_mode='conllu',sent_tag='auto',checkpointfile = None):
 
         def is_sgml_tag(line):
             return line.startswith("<") and line.endswith(">")
@@ -1257,7 +1266,7 @@ class Tagger():
 
         # don't feed the sentencer our pos and lemma predictions, if we have them
         no_pos_lemma = re.sub(r"([^\n\t]*?)\t[^\n\t]*?\t[^\n\t]*?\n", r"\1\n", xml_data)
-        split_indices, pos_tags, morphs, words = self.inference(no_pos_lemma,checkpointfile=checkpointfile)
+        split_indices, pos_tags, morphs, words = self.inference(no_pos_lemma,sent_tag=sent_tag,checkpointfile=checkpointfile)
 
         # for xml
         counter = 0
@@ -1310,20 +1319,20 @@ class Tagger():
         lines = reorder(lines)
 
         # Split out the internal tags within MWT tokens, as these too get a POS tag
-        lines = lines.split("\n")
+        data = lines.split("\n")
         retokenized = []
-        for line in lines:
+        for line in data:
             if line == "|":
                 retokenized.append(line)
             else:
                 retokenized.append("\n".join(line.split("|")))
-        lines = "\n".join(retokenized)
+        data = "\n".join(retokenized)
 
         """
         Now add the pos tags
         """
-        bound_group_map = get_bound_group_map(lines) if out_mode == "conllu" else None
-        data = conllize(lines, element="s", super_mapping=bound_group_map, attrs_as_comments=True)
+        bound_group_map = get_bound_group_map(data) if out_mode == "conllu" else None
+        data = conllize(data, element="s", super_mapping=bound_group_map, attrs_as_comments=True)
         data = data.strip() + "\n"  # Ensure final new line for last sentence
 
         # add the pos tags to conllized file and remove the rows hyphenated MWT ID
@@ -1418,7 +1427,6 @@ def main(): # testing only
                     datatype=args.datatype)
 
     tagger.prepare_data_files()
-    # tagger.train(checkpointfile='/home/nitin/Desktop/hebpipe/HebPipe/hebpipe/data/checkpoint/htb_best_sent_pos_model_13.316283_0.979424_0.98009.pt')
     tagger.train()
 
 

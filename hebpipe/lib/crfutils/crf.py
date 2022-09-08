@@ -10,7 +10,7 @@ class CRF(torch.nn.Module):
     but also on previous seen annotations.
     """
 
-    def __init__(self, tag_dictionary, tagset_size: int, init_from_state_dict: bool):
+    def __init__(self, tag_dictionary, tagset_size: int, init_from_state_dict: bool,cpu=False):
         """
         :param tag_dictionary: tag dictionary in order to find ID for start and stop tags
         :param tagset_size: number of tag from tag dictionary
@@ -20,7 +20,10 @@ class CRF(torch.nn.Module):
 
         self.tagset_size = tagset_size
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if cpu == False:
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = 'cpu'
 
         # Transitions are used in the following way: transitions[to, from].
         self.transitions = torch.nn.Parameter(torch.randn(tagset_size, tagset_size))

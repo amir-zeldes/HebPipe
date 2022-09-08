@@ -16,7 +16,7 @@ class ViterbiLoss(torch.nn.Module):
     Calculates the loss for each sequence up to its length t.
     """
 
-    def __init__(self, tag_dictionary: Dictionary):
+    def __init__(self, tag_dictionary: Dictionary,cpu=False):
         """
         :param tag_dictionary: tag_dictionary of task
         """
@@ -26,8 +26,10 @@ class ViterbiLoss(torch.nn.Module):
         self.start_tag = tag_dictionary.get_idx_for_item(START_TAG)
         self.stop_tag = tag_dictionary.get_idx_for_item(STOP_TAG)
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+        if cpu == False:
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = "cpu"
 
     def forward(self, features_tuple: tuple, targets: torch.Tensor) -> torch.Tensor:
         """
@@ -129,7 +131,7 @@ class ViterbiDecoder:
     Decodes a given sequence using the Viterbi algorithm.
     """
 
-    def __init__(self, tag_dictionary: Dictionary):
+    def __init__(self, tag_dictionary: Dictionary,cpu=False):
         """
         :param tag_dictionary: Dictionary of tags for sequence labeling task
         """
@@ -138,7 +140,10 @@ class ViterbiDecoder:
         self.start_tag = tag_dictionary.get_idx_for_item(START_TAG)
         self.stop_tag = tag_dictionary.get_idx_for_item(STOP_TAG)
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if cpu == False:
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = 'cpu'
 
 
     def decode(
