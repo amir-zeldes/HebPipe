@@ -582,116 +582,116 @@ def download_requirements(models_ok=True):
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
         out_mode="conllu", sent_tag=None, preloaded=None,  from_pipes=False,cpu=False):
 
-        data = input_data.replace("\t","")
-        data = data.replace("\r","")
+    data = input_data.replace("\t","")
+    data = data.replace("\r","")
 
-        if from_pipes:
-            input_data = input_data.replace("|","")
+    if from_pipes:
+        input_data = input_data.replace("|","")
 
-        if preloaded is not None:
-            rf_tok, xrenner, mtltagger,parser, lemmatizer = preloaded
+    if preloaded is not None:
+        rf_tok, xrenner, mtltagger,parser, lemmatizer = preloaded
+    else:
+        rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
+        xrenner = Xrenner(model=model_dir + "heb.xrm")
+        parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
+        lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
+        mtltagger = Tagger(trainflag=False, bestmodelpath=model_dir, sequencelength=256,cpu=cpu)
+
+    if do_whitespace:
+        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto", from_pipes=from_pipes)
+
+    if from_pipes:
+        tokenized = data
+    else:
+        if do_tok:
+            tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
+            tokenized = "\n".join(tokenized)
         else:
-            rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
-            xrenner = Xrenner(model=model_dir + "heb.xrm")
-            parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
-            lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
-            mtltagger = Tagger(trainflag=False, bestmodelpath=model_dir, sequencelength=256,cpu=cpu)
-
-        if do_whitespace:
-            data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto", from_pipes=from_pipes)
-
-        if from_pipes:
+            # Assume data is already one token per line
             tokenized = data
-        else:
-            if do_tok:
-                tokenized = rf_tok.rf_tokenize(data.strip().split("\n"))
-                tokenized = "\n".join(tokenized)
+
+    bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
+
+    if mtltagger:
+        tagged_conllu, tokenized, morphs, words = mtltagger.predict(tokenized,sent_tag=sent_tag,checkpointfile=model_dir + 'heb.sbdposmorph.pt')
+
+    if out_mode == "pipes":
+        return tokenized
+    else:
+        tokenized = tokenized.split("\n")
+        retokenized = []
+        for line in tokenized:
+            if line == '|':
+                retokenized.append(line)
             else:
-                # Assume data is already one token per line
-                tokenized = data
+                retokenized.append("\n".join(line.split("|")))
+        tokenized =  "\n".join(retokenized)
 
-        bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
+    if sent_tag == 'auto': sent_tag = 's'
 
-        if mtltagger:
-            tagged_conllu, tokenized, morphs, words = mtltagger.predict(tokenized,sent_tag=sent_tag,checkpointfile=model_dir + 'heb.sbdposmorph.pt')
+    del mtltagger
+    del rf_tok
+    torch.cuda.empty_cache()
 
-        if out_mode == "pipes":
+    if do_tag:
+        zeros = ["0" for i in range(len(morphs))]
+        zero_conllu = inject_col(zeros, tagged_conllu, into_col=6, skip_supertoks=True)
+        lemmas = lemmatize(lemmatizer, zero_conllu, morphs)
+        tagged = inject_col(tagged_conllu, tokenized, 4)
+
+        if do_lemma:
+            lemmatized = inject_col(lemmas, tagged, -1)
+        else:
+            lemmatized = tagged
+
+        morphs = postprocess_morph(morphs, words, lemmas)
+        morphed = inject_col(morphs, lemmatized, -1)
+
+        if not do_parse:
+            if out_mode == "conllu":
+                conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                     attrs_as_comments=True)
+                conllized = add_space_after(input_data,conllized)
+                return conllized
+            else:
+                if not PY3:
+                    morphed = morphed.decode("utf8")
+                return morphed
+
+    else:
+        if out_mode == "conllu":
+            conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
+                                 attrs_as_comments=True, ten_cols=True)
+            conllized = add_space_after(input_data,conllized)
+            return conllized
+        else:
             return tokenized
+
+    if do_parse:
+        conllized = conllize(morphed,tag="PUNCT",element=sent_tag,no_zero=True,super_mapping=bound_group_map,attrs_as_comments=True,ten_cols=True)
+        parsed = diaparse(parser, conllized)
+        parsed = morph_deped.run_depedit(parsed)
+
+        if do_entity:
+            xrenner.docname = "_"
+            ents = xrenner.analyze(parsed,"conll_sent")
+            ents = get_col(ents, -1)
+            entified = inject_col(ents, parsed, col=-1, into_col=9, skip_supertoks=True)
+            entified = add_space_after(input_data,entified)
+            if PY3:
+                return entified
+            else:
+                return entified.decode("utf8")
         else:
-            tokenized = tokenized.split("\n")
-            retokenized = []
-            for line in tokenized:
-                if line == '|':
-                    retokenized.append(line)
-                else:
-                    retokenized.append("\n".join(line.split("|")))
-            tokenized =  "\n".join(retokenized)
-
-        if sent_tag == 'auto': sent_tag = 's'
-
-        del mtltagger
-        del rf_tok
-        torch.cuda.empty_cache()
-
-        if do_tag:
-            zeros = ["0" for i in range(len(morphs))]
-            zero_conllu = inject_col(zeros, tagged_conllu, into_col=6, skip_supertoks=True)
-            lemmas = lemmatize(lemmatizer, zero_conllu, morphs)
-            tagged = inject_col(tagged_conllu, tokenized, 4)
-
-            if do_lemma:
-                lemmatized = inject_col(lemmas, tagged, -1)
-            else:
-                lemmatized = tagged
-
-            morphs = postprocess_morph(morphs, words, lemmas)
-            morphed = inject_col(morphs, lemmatized, -1)
-
-            if not do_parse:
-                if out_mode == "conllu":
-                    conllized = conllize(morphed, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                         attrs_as_comments=True)
-                    conllized = add_space_after(input_data,conllized)
-                    return conllized
-                else:
-                    if not PY3:
-                        morphed = morphed.decode("utf8")
-                    return morphed
-
+            parsed = add_space_after(input_data,parsed)
+            return parsed
+    else:
+        if out_mode == "conllu":
+            conllized = conllize(tagged,tag="PUNCT",element=sent_tag,no_zero=True,super_mapping=bound_group_map,attrs_as_comments=True)
+            conllized = add_space_after(input_data,conllized)
+            return conllized
         else:
-            if out_mode == "conllu":
-                conllized = conllize(tokenized, tag="PUNCT", element=sent_tag, no_zero=True, super_mapping=bound_group_map,
-                                     attrs_as_comments=True, ten_cols=True)
-                conllized = add_space_after(input_data,conllized)
-                return conllized
-            else:
-                return tokenized
-
-        if do_parse:
-            conllized = conllize(morphed,tag="PUNCT",element=sent_tag,no_zero=True,super_mapping=bound_group_map,attrs_as_comments=True,ten_cols=True)
-            parsed = diaparse(parser, conllized)
-            parsed = morph_deped.run_depedit(parsed)
-
-            if do_entity:
-                xrenner.docname = "_"
-                ents = xrenner.analyze(parsed,"conll_sent")
-                ents = get_col(ents, -1)
-                entified = inject_col(ents, parsed, col=-1, into_col=9, skip_supertoks=True)
-                entified = add_space_after(input_data,entified)
-                if PY3:
-                    return entified
-                else:
-                    return entified.decode("utf8")
-            else:
-                parsed = add_space_after(input_data,parsed)
-                return parsed
-        else:
-            if out_mode == "conllu":
-                conllized = conllize(tagged,tag="PUNCT",element=sent_tag,no_zero=True,super_mapping=bound_group_map,attrs_as_comments=True)
-                conllized = add_space_after(input_data,conllized)
-                return conllized
-            else:
-                return tagged
+            return tagged
 
 def run_hebpipe():
 
