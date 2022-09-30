@@ -521,7 +521,7 @@ def diaparse(parser, conllu):
     return merged
 
 
-def postprocess_morph(feats, words, lemmas):
+def postprocess_morph(feats, words, lemmas, tags):
     def add_feat(morph, feat):
         if morph == "_":
             return feat
@@ -535,7 +535,8 @@ def postprocess_morph(feats, words, lemmas):
     for i, lemma in enumerate(lemmas):
         word = words[i]
         feat = feats[i]
-        if "HebBinyan" in feat:  # Rely on BERT to notice that binyan is needed
+        tag = tags[i]
+        if "HebBinyan" in feat or tag == "VERB":  # Rely on BERT to notice that binyan is needed, or if it's a VERB
             if (word,lemma) in binyan_lookup:
                 feat = add_feat(feat,"HebBinyan=" + binyan_lookup[(word,lemma)])
             elif lemma in binyan_lemma_lookup:
@@ -562,7 +563,7 @@ def check_requirements():
 def download_requirements(models_ok=True):
     urls = []
     if not models_ok:
-        models_base = "http://gucorpling.org/amir/download/heb_models_v2/"
+        models_base = "http://gucorpling.org/amir/download/heb_models_v3/"
         urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
         urls.append(models_base + "heb.diaparser")
         urls.append(models_base + "heb.xrm")
@@ -644,7 +645,8 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         else:
             lemmatized = tagged
 
-        morphs = postprocess_morph(morphs, words, lemmas)
+        tags = [l.split("\t")[3] for l in tagged_conllu.split("\n") if "\t" in l]
+        morphs = postprocess_morph(morphs, words, lemmas, tags)
         morphed = inject_col(morphs, lemmatized, -1)
 
         if not do_parse:
@@ -693,6 +695,7 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         else:
             return tagged
 
+
 def run_hebpipe():
 
     if sys.version_info[0] == 2 and sys.version_info[1] < 7:
@@ -718,11 +721,11 @@ OR specify no processing options (automatically assumes you want all steps)
 Just tokenize a file using pipes:
 > python heb_pipe.py -wt -o pipes example_in.txt     
 
-Pos tag, lemmatize, add morphology and parse a pre-tokenized file, splitting sentences by existing <sent> tags:
-> python heb_pipe.py -plmd -s sent example_in.txt  
+POS tag, lemmatize, add morphology and parse a pre-tokenized file, splitting sentences by existing <sent> tags:
+> python heb_pipe.py -pld -s sent example_in.txt  
 
 Add full analyses to a whole directory of *.txt files, output to a specified directory:    
-> python heb_pipe.py -wtplmdec --dirout /home/heb/out/ *.txt
+> python heb_pipe.py -wtpldec --dirout /home/heb/out/ *.txt
 
 Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use existing tag <sent> to recognize sentence borders:
 > python heb_pipe.py -d -s sent example_in.tt
@@ -732,7 +735,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     g1 = parser.add_argument_group("standard module options")
     g1.add_argument("-w","--whitespace", action="store_true", help='Perform white-space based tokenization of large word forms')
     g1.add_argument("-t","--tokenize", action="store_true", help='Tokenize large word forms into smaller morphological segments')
-    g1.add_argument("-g","--posmorph", action="store_true", help='Do POS and Morph tagging')
+    g1.add_argument("-p","--posmorph", action="store_true", help='Do POS and Morph tagging')
     g1.add_argument("-l","--lemma", action="store_true", help='Do lemmatization')
     g1.add_argument("-d","--dependencies", action="store_true", help='Parse with dependency parser')
     g1.add_argument("-e","--entities", action="store_true", help='Add entity spans and types')
@@ -775,7 +778,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     if not opts.quiet:
         log_tasks(opts)
 
-    # Check if models, Marmot and Malt Parser are available
+    # Check if models are available
     if opts.posmorph or opts.lemma or opts.dependencies or opts.tokenize or opts.entities:
         models_OK = check_requirements()
         if not models_OK:
@@ -840,7 +843,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
                 f.write((processed.strip() + "\n"))
         else:  # Single file, print to stdout
             if PY3:
-                sys.stdout.buffer.write(processed.encode("utf8"))
+                sys.stdout.buffer.write((processed+"\n\n").encode("utf8"))
             else:
                 print(processed.encode("utf8"))
 
