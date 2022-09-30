@@ -97,7 +97,7 @@ standard module options:
                         forms
   -t, --tokenize        Tokenize large word forms into smaller morphological
                         segments
-  -g, --posmorph        Do POS tagging and Morphological Tagging
+  -p, --posmorph        Do POS tagging and Morphological Tagging
   -l, --lemma           Do lemmatization
   -d, --dependencies    Parse with dependency parser
   -e, --entities        Add entity spans and types
@@ -122,7 +122,7 @@ less common options:
 
 Whitespace tokenize, tokenize morphemes, add pos, lemma, morph, dep parse with automatic sentence splitting, 
 entity recognition and coref for one text file, output in default conllu format:
-> python heb_pipe.py -wtgldec example_in.txt        
+> python heb_pipe.py -wtpldec example_in.txt        
 
 OR specify no processing options (automatically assumes you want all steps)
 > python heb_pipe.py example_in.txt        
@@ -131,10 +131,10 @@ Just tokenize a file using pipes:
 > python heb_pipe.py -wt -o pipes example_in.txt     
 
 Pos tag, lemmatize, add morphology and parse a pre-tokenized file, splitting sentences by existing <sent> tags:
-> python heb_pipe.py -gld -s sent example_in.txt  
+> python heb_pipe.py -pld -s sent example_in.txt  
 
 Add full analyses to a whole directory of *.txt files, output to a specified directory:    
-> python heb_pipe.py -wtgldec --dirout /home/heb/out/ *.txt
+> python heb_pipe.py -wtpldec --dirout /home/heb/out/ *.txt
 
 Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use existing tag <sent> to recognize sentence borders:
 > python heb_pipe.py -d -s sent example_in.tt
