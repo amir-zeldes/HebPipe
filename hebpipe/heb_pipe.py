@@ -827,7 +827,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
             sys.stderr.write("Processing " + base + "\n")
 
         try:
-            input_text = io.open(infile,encoding="utf8").read().replace("\r","").replace('\n'," ")
+            input_text = io.open(infile,encoding="utf8").read().replace("\r","")
         except UnicodeDecodeError:  # Fallback to support Windows Hebrew encoding
             input_text = io.open(infile,encoding="cp1255").read().replace("\r","")
 
