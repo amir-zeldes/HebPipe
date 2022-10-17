@@ -713,7 +713,7 @@ def run_hebpipe():
 --------------
 Whitespace tokenize, tokenize morphemes, add pos, lemma, morph, dep parse with automatic sentence splitting, 
 entity recognition and coref for one text file, output in default conllu format:
-> python heb_pipe.py -wtplmdec example_in.txt        
+> python heb_pipe.py -wtpldec example_in.txt        
 
 OR specify no processing options (automatically assumes you want all steps)
 > python heb_pipe.py example_in.txt        
