@@ -398,11 +398,8 @@ class MTLModel(nn.Module):
         # Make embeddings and scalar average them across subwords, vertically.
         sentences = [d.split() for d in sentences] # for AlephBERT
         tokens = self.tokenizer(sentences,return_tensors='pt',padding=True,is_split_into_words=True,truncation=True).to(self.device) # tell AlephBERT that there is some tokenization already.
-        try:
-            output = self.model(**tokens)
-        except Exception:
-            print ('here')
-            raise
+
+        output = self.model(**tokens)
         hiddenstates = output[2][-self.lastn:]
         scalarsum = hiddenstates[0]
         for i in range(1,self.lastn):
