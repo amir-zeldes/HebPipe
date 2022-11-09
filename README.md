@@ -15,22 +15,18 @@ A simple NLP pipeline for Hebrew text in UTF-8 encoding, using standard componen
 
 Note that entity recognition and coreference are still in beta and offer rudimentary accuracy.
 
-Online demo available at: (choose 'Hebrew' and enter plain text)
+To cite this tool in academic papers please refer to this paper:
 
-https://corpling.uis.georgetown.edu/xrenner/
+Zeldes, Amir, Nick Howell, Noam Ordan and Yifat Ben Moshe (2022) [A Second Wave of UD Hebrew Treebanking and Cross-Domain Parsing](https://arxiv.org/abs/2210.07873). In: *Proceedings of EMNLP 2022*. Abu Dhabi, UAE.
 
-To cite this work please refer to the paper about the morphological segmenter here:
-
-Zeldes, Amir (2018) A Characterwise Windowed Approach to Hebrew Morphological Segmentation. In: *Proceedings of the 15th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology*. Brussels, Belgium.
 
 ```
-@InProceedings{Zeldes2018,
-  author    = {Amir Zeldes},
-  title     = {A CharacterwiseWindowed Approach to {H}ebrew Morphological Segmentation},
-  booktitle = {Proceedings of the 15th {SIGMORPHON} Workshop on Computational Research in Phonetics, Phonology, and Morphology},
-  year      = {2018},
-  pages      = {101--110},
-  address   = {Brussels, Belgium}
+@InProceedings{ZeldesHowellOrdanBenMoshe2022,
+  author    = {Amir Zeldes and Nick Howell and Noam Ordan and Yifat Ben Moshe},
+  booktitle = {Proceedings of {EMNLP} 2022},
+  title     = {A SecondWave of UD Hebrew Treebanking and Cross-Domain Parsing},
+  year      = {2022},
+  address   = {Abu Dhabi, UAE},
 }
 ```
 
@@ -57,18 +53,23 @@ Models can be downloaded automatically by the script on its first run.
 
 The NLP pipeline will run on Python 2.7+ or Python 3.5+ (2.6 and lower are not supported). Required libraries:
 
-  * requests
-  * numpy
-  * scipy
-  * pandas
-  * depedit
-  * xmltodict
-  * xgboost==0.81
-  * rftokenizer
-  * joblib
-  * flair==0.6.1
-  * stanza
-  * diaparser
+```
+requests
+transformers==3.5.1
+torch==1.6.0
+xgboost==0.81
+rftokenizer
+numpy
+scipy
+depedit
+pandas
+joblib
+xmltodict
+diaparser==1.1.2
+flair==0.6.1
+stanza
+conllu
+```
 
 You should be able to install these manually via pip if necessary (i.e. `pip install rftokenizer` etc.).
 
@@ -79,7 +80,7 @@ Note that some older versions of Python + Windows do not install numpy correctly
 
 ### Model files
 
-Model files are too large to include in the standard GitHub repository. The software will offer to download them automatically. The latest models can also be downloaded manually at https://corpling.uis.georgetown.edu/amir/download/heb_models_v2/. 
+Model files are too large to include in the standard GitHub repository. The software will offer to download them automatically. The latest models can also be downloaded manually at https://gucorpling.org/amir/download/heb_models_v3/. 
 
 ## Command line usage
 

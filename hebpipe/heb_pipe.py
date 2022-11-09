@@ -20,8 +20,6 @@ try:  # Module usage
     from .lib.append_column import inject_col
     from .lib.sent_split import toks_to_sents
     from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
-    from .lib.flair_sent_splitter import FlairSentSplitter
-    from .lib.flair_pos_tagger import FlairTagger
     from .lib.mtlmodel import Tagger
 except ImportError:  # direct script usage
     from lib.xrenner import Xrenner
@@ -30,8 +28,6 @@ except ImportError:  # direct script usage
     from lib.append_column import inject_col
     from lib.sent_split import toks_to_sents
     from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
-    from lib.flair_sent_splitter import FlairSentSplitter
-    from lib.flair_pos_tagger import FlairTagger
     from lib.mtlmodel import Tagger
 
 PY3 = sys.version_info[0] > 2
@@ -713,7 +709,7 @@ def run_hebpipe():
 --------------
 Whitespace tokenize, tokenize morphemes, add pos, lemma, morph, dep parse with automatic sentence splitting, 
 entity recognition and coref for one text file, output in default conllu format:
-> python heb_pipe.py -wtplmdec example_in.txt        
+> python heb_pipe.py -wtpldec example_in.txt        
 
 OR specify no processing options (automatically assumes you want all steps)
 > python heb_pipe.py example_in.txt        
@@ -761,8 +757,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     opts = diagnose_opts(opts)
 
     if opts.cpu:
-        import flair
-        flair.device = torch.device('cpu')
         torch.cuda.is_available = lambda: False
 
     dotok = opts.tokenize
