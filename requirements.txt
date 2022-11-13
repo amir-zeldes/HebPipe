@@ -1,6 +1,6 @@
 requests
 transformers==3.5.1
-torch==1.6.0
+torch==1.7.1
 xgboost==0.81
 rftokenizer
 numpy
@@ -13,3 +13,4 @@ diaparser==1.1.2
 flair==0.6.1
 stanza
 conllu
+protobuf==3.20.*
