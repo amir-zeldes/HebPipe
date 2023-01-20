@@ -9,14 +9,21 @@ import argparse
 
 
 from flair.data import Dictionary, Sentence
-from lib.dropout import WordDropout,LockedDropout
 from transformers import BertModel,BertTokenizerFast,BertConfig
 from random import sample
 from collections import defaultdict
-from lib.crfutils.crf import CRF
-from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
-from lib.reorder_sgml import reorder
-from lib.tt2conll import conllize
+try:
+    from lib.dropout import WordDropout,LockedDropout
+    from lib.crfutils.crf import CRF
+    from lib.crfutils.viterbi import ViterbiDecoder,ViterbiLoss
+    from lib.reorder_sgml import reorder
+    from lib.tt2conll import conllize
+except ModuleNotFoundError:
+    from .dropout import WordDropout, LockedDropout
+    from .crfutils.crf import CRF
+    from .crfutils.viterbi import ViterbiDecoder, ViterbiLoss
+    from .reorder_sgml import reorder
+    from .tt2conll import conllize
 
 from time import time
 
