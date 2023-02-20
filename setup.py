@@ -8,7 +8,7 @@ setup(
   author = 'Amir Zeldes',
   author_email = 'amir.zeldes@georgetown.edu',
   package_data = {'':['README.md','LICENSE.md','requirements.txt'],'hebpipe':['lib/*','data/*','bin/*','models/models_go_here.txt','models/stanza/stanza_models_here.txt']},
-   install_requires=['requests','numpy','transformers==3.5.1','torch==1.7.1','pandas','scipy','joblib','xgboost==0.81','rftokenizer','depedit','xmltodict', 'diaparser==1.1.2','flair==0.6.1','stanza','conllu','protobuf==3.20.*'],
+   install_requires=['requests','numpy','transformers==3.5.1','torch==1.13.1','pandas','scipy','joblib','xgboost==0.81','rftokenizer','depedit','xmltodict', 'diaparser==1.1.2','flair==0.6.1','stanza','conllu','protobuf==3.20.*'],
   url = 'https://github.com/amir-zeldes/HebPipe',
   license='Apache License, Version 2.0',
   download_url = 'https://github.com/amir-zeldes/HebPipe/releases/tag/v3.0.0.3',

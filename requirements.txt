@@ -1,6 +1,6 @@
 requests
 transformers==3.5.1
-torch==1.7.1
+torch==1.13.1
 xgboost==0.81
 rftokenizer
 numpy
