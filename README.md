@@ -25,6 +25,7 @@ Zeldes, Amir, Nick Howell, Noam Ordan and Yifat Ben Moshe (2022) [A Second Wave 
   author    = {Amir Zeldes and Nick Howell and Noam Ordan and Yifat Ben Moshe},
   booktitle = {Proceedings of {EMNLP} 2022},
   title     = {A SecondWave of UD Hebrew Treebanking and Cross-Domain Parsing},
+  pages     = {4331--4344},
   year      = {2022},
   address   = {Abu Dhabi, UAE},
 }
