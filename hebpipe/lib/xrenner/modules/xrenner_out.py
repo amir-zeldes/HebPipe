@@ -184,6 +184,8 @@ def output_conll_sent(conll_tokens, markstart_dict, markend_dict, file_name, out
 					coref_col += ")"
 		if int(out_tok.id) not in markstart_dict and int(out_tok.id) not in markend_dict:
 			coref_col = "_"
+		if coref_col == "":
+			coref_col = "_"
 
 		line += infstat_col + "\t" + coref_col
 		output_string += line + "\n"
