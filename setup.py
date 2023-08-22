@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'hebpipe',
   packages = find_packages(),
-  version = '3.0.0.5',
+  version = '3.0.0.6',
   description = 'A pipeline for Hebrew NLP',
   author = 'Amir Zeldes',
   author_email = 'amir.zeldes@georgetown.edu',
@@ -11,7 +11,7 @@ setup(
    install_requires=['requests','numpy','gensim==3.8.3','transformers==3.5.1','torch==1.7.1','pandas','scipy','joblib','xgboost==0.81','rftokenizer','depedit','xmltodict', 'diaparser==1.1.2','flair==0.6.1','stanza','conllu','protobuf==3.20.*'],
   url = 'https://github.com/amir-zeldes/HebPipe',
   license='Apache License, Version 2.0',
-  download_url = 'https://github.com/amir-zeldes/HebPipe/releases/tag/v3.0.0.5',
+  download_url = 'https://github.com/amir-zeldes/HebPipe/releases/tag/v3.0.0.6',
   keywords = ['NLP', 'Hebrew', 'segmentation', 'tokenization', 'tagging', 'parsing','morphology','POS','lemmatization'],
   classifiers = ['Programming Language :: Python',
 'Programming Language :: Python :: 2',
