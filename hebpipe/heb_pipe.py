@@ -12,6 +12,14 @@ import stanza
 from stanza.models.common.doc import Document
 import torch
 
+import collections
+try:
+    from collections import Mapping
+except:
+    from collections.abc import Mapping
+    collections.Mapping = Mapping
+
+
 from rftokenizer import RFTokenizer
 try:  # Module usage
     from .lib.xrenner import Xrenner
