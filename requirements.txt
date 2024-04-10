@@ -1,5 +1,5 @@
 requests
-transformers==3.5.1
+transformers==4.38.0
 torch==1.7.1
 xgboost==0.81
 gensim==3.8.3
