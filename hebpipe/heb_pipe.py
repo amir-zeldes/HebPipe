@@ -12,6 +12,14 @@ import stanza
 from stanza.models.common.doc import Document
 import torch
 
+import collections
+try:
+    from collections import Mapping
+except:
+    from collections.abc import Mapping
+    collections.Mapping = Mapping
+
+
 from rftokenizer import RFTokenizer
 try:  # Module usage
     from .lib.xrenner import Xrenner
@@ -20,7 +28,6 @@ try:  # Module usage
     from .lib.append_column import inject_col
     from .lib.sent_split import toks_to_sents
     from .lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
-    from .lib.mtlmodel import Tagger
 except ImportError:  # direct script usage
     from lib.xrenner import Xrenner
     from lib._version import __version__
@@ -28,7 +35,13 @@ except ImportError:  # direct script usage
     from lib.append_column import inject_col
     from lib.sent_split import toks_to_sents
     from lib.whitespace_tokenize import add_space_after, tokenize as whitespace_tokenize
-    from lib.mtlmodel import Tagger
+
+from transformers import logging
+from torch import _logging
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+logging.set_verbosity_error()
+_logging.set_logs(all=logging.ERROR)
 
 PY3 = sys.version_info[0] > 2
 
@@ -44,7 +57,6 @@ lib_dir = script_dir + os.sep + "lib" + os.sep
 bin_dir = script_dir + os.sep + "bin" + os.sep
 data_dir = script_dir + os.sep + "data" + os.sep
 model_dir = script_dir + os.sep + "models" + os.sep
-marmot_path = bin_dir + "Marmot" + os.sep
 
 KNOWN_PUNCT = {'’','“','”'}  # Hardwired tokens to tag as punctutation (unicode glyphs not in training data)
 morph_deped = DepEdit(config_file=lib_dir+"partial_morph.ini")
@@ -66,25 +78,26 @@ for l in binyan_data:
 
 
 def init_lemmatizer(cpu=False, no_post_process=False):
-    lemmatizer = stanza.Pipeline("he", package="htb", processors="lemma", tokenize_no_ssplit=True,
-                         tokenize_pretokenized=True,
-                          lemma_pretagged=True,
-                          depparse_pretagged=True,
-                          use_gpu=not cpu,
-                          lemma_model_path=model_dir + "stanza" + os.sep + "he_lemmatizer.pt")
+    lemmatizer = stanza.Pipeline("he", package="combined", processors="tokenize,pos,lemma",
+                        tokenize_pretokenized=True,
+                        use_gpu=not cpu,
+                        download_method=2,
+                        #lemma_model_path=model_dir + "stanza" + os.sep + "he_lemmatizer.pt"
+                        )
     lemmatizer.do_post_process = False if no_post_process else True
     return lemmatizer
 
 
 def log_tasks(opts):
     sys.stderr.write("\nRunning tasks:\n" +"="*20 + "\n")
-    if opts.sent not in ["auto","none"]:
-        sys.stderr.write("o Splitting sentences based on tag: "+opts.sent+"\n")
+    if opts.sent == "newline":
+        sys.stderr.write("o Automatic sentence splitting based on newlines\n")
     elif opts.sent == "auto":
-        if opts.punct_sentencer:
-            sys.stderr.write("o Automatic sentence splitting (punctuation based)\n")
-        else:
-            sys.stderr.write("o Automatic sentence splitting (neural)\n")
+        sys.stderr.write("o Automatic sentence splitting\n")
+    elif opts.sent == "both":
+        sys.stderr.write("o Automatic sentence splitting, including based on newlines\n")
+    else:
+        sys.stderr.write("o Splitting sentences based on tag: "+opts.sent+"\n")
     if opts.whitespace:
         sys.stderr.write("o Whitespace tokenization\n")
     if opts.tokenize:
@@ -176,61 +189,6 @@ def get_bound_group_map(data):
     return mapping
 
 
-def remove_nesting_attr(data, nester, nested, attr="xml:lang"):
-    """
-    Removes attribute on nesting element if a nested element includes it
-
-    :param data: SGML input
-    :param nester: nesting tag, e.g. "norm"
-    :param nested: nested tag, e.g. "morph"
-    :param attr: attribute, e.g. "lang"
-    :return: cleaned SGML
-    """
-
-    if attr not in data:
-        return data
-    flagged = []
-    in_attr_nester = False
-    last_nester = -1
-    lines = data.split("\n")
-    for i, line in enumerate(lines):
-        if nester + "=" in line and attr+"=" in line:
-            in_attr_nester = True
-            last_nester = i
-        if "</" + nester + ">" in line:
-            in_attr_nester = False
-        if nested in line and attr+"=" in line and in_attr_nester and last_nester > -1:
-            flagged.append(last_nester)
-            in_attr_nester = False
-    for i in flagged:
-        lines[i] = re.sub(' '+attr+'="[^"]+"','',lines[i])
-    return "\n".join(lines)
-
-
-def tok_from_norm(data):
-    """
-    Takes TT-SGML, extracts norm attribute, and replaces existing tokens with norm values while retaining SGML tags.
-    Used to feed parser norms while retaining SGML sentence separators.
-
-    :param data: TTSGML with <norm norm=...> and raw tokens to replace
-    :return: TTSGML with tags preserved and tokens replace by norm attribute values
-    """
-
-    outdata = []
-    norm = ""
-    for line in data.replace("\r","").split("\n"):
-        if line.startswith("<"):
-            m = re.search(r'norm="([^"]*)"',line)
-            if m is not None:
-                norm = m.group(1)
-            outdata.append(line)
-        else:
-            if norm != "":
-                outdata.append(norm)
-                norm=""
-    return "\n".join(outdata) + "\n"
-
-
 def read_attributes(input,attribute_name):
     out_stream =""
     for line in input.split('\n'):
@@ -295,83 +253,6 @@ def get_col(data, colnum):
 
     splits = [row.split("\t") for row in data if "\t" in row]
     return [r[colnum] for r in splits]
-
-
-def exec_via_temp(input_text, command_params, workdir="", outfile=False):
-    temp = tempfile.NamedTemporaryFile(delete=False)
-    if outfile:
-        temp2 = tempfile.NamedTemporaryFile(delete=False)
-    output = ""
-    try:
-        temp.write(input_text.encode("utf8"))
-        temp.close()
-
-        if outfile:
-            command_params = [x if 'tempfilename2' not in x else x.replace("tempfilename2",temp2.name) for x in command_params]
-        command_params = [x if 'tempfilename' not in x else x.replace("tempfilename",temp.name) for x in command_params]
-        if workdir == "":
-            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE)
-            (stdout, stderr) = proc.communicate()
-        else:
-            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE,cwd=workdir)
-            (stdout, stderr) = proc.communicate()
-        if outfile:
-            if PY3:
-                output = io.open(temp2.name,encoding="utf8").read()
-            else:
-                output = open(temp2.name).read()
-            temp2.close()
-            os.remove(temp2.name)
-        else:
-            output = stdout
-        #print(stderr)
-        proc.terminate()
-    except Exception as e:
-        print(e)
-    finally:
-        os.remove(temp.name)
-        return output
-
-
-def exec_via_temp_old(input_text, command_params, workdir=""):
-    temp = tempfile.NamedTemporaryFile(delete=False)
-    exec_out = ""
-    try:
-        if PY3:
-            temp.write(input_text.encode("utf8"))
-        else:
-            temp.write(input_text.encode("utf8"))
-        temp.close()
-
-        command_params = [x if x != 'tempfilename' else temp.name for x in command_params]
-        if workdir == "":
-            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE)
-            (stdout, stderr) = proc.communicate()
-        else:
-            proc = subprocess.Popen(command_params, stdout=subprocess.PIPE,stdin=subprocess.PIPE,stderr=subprocess.PIPE,cwd=workdir)
-            (stdout, stderr) = proc.communicate()
-
-        exec_out = stdout
-    except Exception as e:
-        print(e)
-    finally:
-        os.remove(temp.name)
-        #if PY3:
-        exec_out = exec_out.decode("utf8")
-        return exec_out
-
-
-def get_origs(data):
-    origs = []
-    current = ""
-    for line in data.split("\n"):
-        if "</norm>" in line:
-            origs.append(current)
-            current = ""
-        if not line.startswith("<"):  # Token line
-            current += line
-
-    return "\n".join(origs)
 
 
 def inject(attribute_name, contents, at_attribute,into_stream,replace=True):
@@ -473,6 +354,8 @@ def lemmatize(lemmatizer, conllu, morphs):
 
     uposed = [[l.split("\t") for l in s.split("\n")] for s in conllu.strip().split("\n\n")]
     dicts = CoNLL.convert_conll(uposed)
+    if isinstance(dicts,tuple):
+        dicts = dicts[0]
     for sent in dicts:
         for tok in sent:
             tok["id"] = int(tok["id"][0])
@@ -544,7 +427,7 @@ def postprocess_morph(feats, words, lemmas, tags):
 def check_requirements():
     models_OK = True
     model_files = ["heb.sm" + str(sys.version_info[0]), "heb.xrm",
-                   "heb.diaparser", "heb.sbdposmorph.pt",
+                   "heb.diaparser",
                    "stanza" + os.sep + "he_lemmatizer.pt",
                    "stanza" + os.sep + "he_htb.pretrain.pt",
                    ]
@@ -559,13 +442,12 @@ def check_requirements():
 def download_requirements(models_ok=True):
     urls = []
     if not models_ok:
-        models_base = "http://gucorpling.org/amir/download/heb_models_v3/"
+        models_base = "http://gucorpling.org/amir/download/heb_models_v4/"
         urls.append(models_base + "heb.sm" + str(sys.version_info[0]))
         urls.append(models_base + "heb.diaparser")
         urls.append(models_base + "heb.xrm")
         urls.append(models_base + "he_htb.pretrain.pt")
         urls.append(models_base + "he_lemmatizer.pt")
-        urls.append(models_base + 'heb.sbdposmorph.pt')
     for u in urls:
         sys.stderr.write("o Downloading from " + str(u) + "\n")
         base_name = u[u.rfind("/") + 1:]
@@ -574,6 +456,33 @@ def download_requirements(models_ok=True):
         else:
             urlretrieve(u, model_dir + base_name)
     sys.stderr.write("\n")
+
+
+def stanza_tag(token_list, sent_tag=None, lemmatizer=None):
+    sent_lists = toks_to_sents(token_list)
+    tokenized = "<s>\n"+ "\n</s>\n<s>\n".join(["\n".join(s).strip() for s in sent_lists]) + "\n</s>"
+    if lemmatizer is None:
+        lemmatizer = stanza.Pipeline("he", package="combined", processors="tokenize,pos,lemma",tokenize_pretokenized=True,use_gpu=torch.cuda.is_available())
+
+    doc = lemmatizer(sent_lists)
+    output = []
+    words = []
+    morphs = []
+    lemmas = []
+    for sent in doc.sentences:
+        for tok in sent.tokens:
+            word = tok.words[0]
+            feats = word.feats if word.feats is not None else "_"
+            morphs.append(feats)
+            words.append(word.text)
+            lemmas.append(word.lemma)
+            row = [str(word.id), word.text, word.lemma, word.upos, word.xpos, word.feats, "_", "_", "_", "_"]
+            row = [str(x) if x is not None else "_" for x in row]
+            output.append("\t".join(row))
+        output.append("")
+    output = "\n".join(output)
+
+    return output, words, morphs, lemmas, tokenized
 
 
 def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True, do_parse=True, do_entity=True,
@@ -586,16 +495,17 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
         input_data = input_data.replace("|","")
 
     if preloaded is not None:
-        rf_tok, xrenner, mtltagger,parser, lemmatizer = preloaded
+        rf_tok, xrenner, parser, lemmatizer = preloaded
     else:
         rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
         xrenner = Xrenner(model=model_dir + "heb.xrm")
         parser = None if not do_parse else Parser.load(model_dir + "heb.diaparser",verbose=False)
         lemmatizer = None if not do_lemma and not do_tag else init_lemmatizer()
-        mtltagger = Tagger(trainflag=False, bestmodelpath=model_dir, sequencelength=256,cpu=cpu)
 
     if do_whitespace:
-        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag=="auto", from_pipes=from_pipes)
+        data = whitespace_tokenize(data, abbr=data_dir + "heb_abbr.tab",add_sents=sent_tag in ["newline","both"], from_pipes=from_pipes)
+        if sent_tag in ["newline","both"]:
+            sent_tag = "s"  # newlines have been replaced by <s> tags
 
     if from_pipes:
         tokenized = data
@@ -609,9 +519,6 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
 
     bound_group_map = get_bound_group_map(tokenized) if out_mode == "conllu" else None
 
-    if mtltagger:
-        tagged_conllu, tokenized, morphs, words = mtltagger.predict(tokenized,sent_tag=sent_tag,checkpointfile=model_dir + 'heb.sbdposmorph.pt')
-
     if out_mode == "pipes":
         return tokenized
     else:
@@ -624,16 +531,14 @@ def nlp(input_data, do_whitespace=True, do_tok=True, do_tag=True, do_lemma=True,
                 retokenized.append("\n".join(line.split("|")))
         tokenized =  "\n".join(retokenized)
 
+    tagged_conllu, words, morphs, lemmas, tokenized = stanza_tag(tokenized.split("\n"),lemmatizer=lemmatizer, sent_tag=sent_tag)
+
     if sent_tag == 'auto': sent_tag = 's'
 
-    del mtltagger
     del rf_tok
     torch.cuda.empty_cache()
 
     if do_tag:
-        zeros = ["0" for i in range(len(morphs))]
-        zero_conllu = inject_col(zeros, tagged_conllu, into_col=6, skip_supertoks=True)
-        lemmas = lemmatize(lemmatizer, zero_conllu, morphs)
         tagged = inject_col(tagged_conllu, tokenized, 4)
 
         if do_lemma:
@@ -736,7 +641,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     g1.add_argument("-d","--dependencies", action="store_true", help='Parse with dependency parser')
     g1.add_argument("-e","--entities", action="store_true", help='Add entity spans and types')
     g1.add_argument("-c","--coref", action="store_true", help='Add coreference annotations')
-    g1.add_argument("-s","--sent", action="store", default="auto", help='XML tag to split sentences, e.g. sent for <sent ..> or none for no splitting (otherwise automatic sentence splitting)')
+    g1.add_argument("-s","--sent", action="store", default="both", help='XML tag to split sentences, e.g. "s" for <s ..> ... </s>, or "newline" to use newlines, "auto" for automatic splitting, or "both" for both')
     g1.add_argument("-o","--out", action="store", choices=["pipes","conllu","sgml"], default="conllu", help='Output CoNLL format, SGML or just tokenize with pipes')
 
     g2 = parser.add_argument_group("less common options")
@@ -745,7 +650,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     g2.add_argument("--cpu", action="store_true", help='Use CPU instead of GPU (slower)')
     g2.add_argument("--disable_lex", action="store_true", help='Do not use lexicon during lemmatization')
     g2.add_argument("--dirout", action="store", default=".", help='Optional output directory (default: this dir)')
-    g2.add_argument("--punct_sentencer", action="store_true", help='Only use punctuation (.?!) to split sentences (deprecated)')
     g2.add_argument("--from_pipes", action="store_true", help='Input contains subtoken segmentation with the pipe character (no automatic tokenization is performed)')
     g2.add_argument("--version", action="store_true", help='Print version number and quit')
 
@@ -792,11 +696,6 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
     else:
         lemmatizer = None
 
-    if opts.posmorph:
-        mtltagger = Tagger(trainflag=False, bestmodelpath=model_dir, sequencelength=256,cpu=opts.cpu)
-    else:
-        mtltagger = None
-
     if dotok:  # Pre-load stacked tokenizer for entire batch
         rf_tok = RFTokenizer(model=model_dir + "heb.sm" + str(sys.version_info[0]))
     else:
@@ -827,7 +726,7 @@ Parse a tagged TT SGML file into CoNLL tabular format for treebanking, use exist
 
         processed = nlp(input_text, do_whitespace=opts.whitespace, do_tok=dotok, do_tag=opts.posmorph, do_lemma=opts.lemma,
                                do_parse=opts.dependencies, do_entity=opts.entities, out_mode=opts.out,
-                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,mtltagger,dep_parser,lemmatizer),
+                               sent_tag=opts.sent, preloaded=(rf_tok,xrenner,dep_parser,lemmatizer),
                                 from_pipes=opts.from_pipes,cpu=opts.cpu)
 
         if len(files) > 1:
