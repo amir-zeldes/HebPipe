@@ -1,0 +1,56 @@
+# Use a CUDA-enabled base image for GPU build (e.g., CUDA 11.8 runtime on Ubuntu 22.04)
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install Python and system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    build-essential \
+    libblas-dev \
+    liblapack-dev \
+    curl \
+    unzip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set python3 and pip3 as the default commands
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/bin/pip
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Copy only the necessary files
+COPY docker/gpu-requirements.txt ./gpu-requirements.txt
+COPY setup.py ./
+COPY hebpipe/ ./hebpipe/
+COPY README.md ./
+COPY hebpipe/example_in.txt ./example_in.txt
+COPY hebpipe/example_out.conllu ./example_out.conllu
+
+# Install Python dependencies for GPU
+# Need to use the extra index URL from the requirements file
+RUN pip install -U pip setuptools wheel && pip install --no-cache-dir -r gpu-requirements.txt && pip install diaparser==1.1.3 --no-deps
+
+
+# Run setup.py install - this registers the package
+RUN python setup.py install
+
+# Download Stanza resources for Hebrew
+RUN python -c "import stanza; stanza.download('he')"
+
+
+# Create a shell script to run hebpipe and keep container alive
+RUN echo '#!/bin/bash\n\
+if [ "$#" -eq 0 ]; then\n\
+    exec tail -f /dev/null\n\
+else\n\
+    exec python -m hebpipe "$@"\n\
+fi' > /app/run.sh && chmod +x /app/run.sh
+
+# Define the entrypoint for the container
+ENTRYPOINT ["/app/run.sh"]

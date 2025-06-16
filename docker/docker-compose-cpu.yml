@@ -1,0 +1,16 @@
+services:
+  hebpipe:
+    container_name: hebpipe-cpu 
+    image: hebpipe_image:cpu # Define the image name and tag for CPU
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu # Use the CPU Dockerfile
+      args:
+        # Pass Python version as argument
+        PY_VERSION: 3
+        HEBPIPE_INSTALL_TYPE: cpu
+    # Optional: Mount a volume to process local files
+    volumes:
+      # Use environment variables for local path, container path is fixed
+      - ${LOCAL_INPUT_DIR}:${CONTAINER_INPUT_DIR}
+    # command: ["example_in.txt"] # Example: processes example_in.txt using the ENTRYPOINT 

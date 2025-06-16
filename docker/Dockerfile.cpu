@@ -1,0 +1,46 @@
+# Use a base Python image for CPU build
+FROM python:3.11-slim
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Copy only the necessary files
+COPY docker/cpu-requirements.txt ./cpu-requirements.txt
+COPY setup.py ./
+COPY README.md ./
+COPY hebpipe/ ./hebpipe/
+COPY hebpipe/example_in.txt ./example_in.txt
+COPY hebpipe/example_out.conllu ./example_out.conllu
+
+# Install system dependencies needed for downloading models (curl, unzip)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libblas-dev \
+    liblapack-dev \
+    curl \
+    unzip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies for CPU
+RUN pip install -U pip setuptools wheel && pip install --no-cache-dir -r cpu-requirements.txt && pip install diaparser==1.1.3 --no-deps
+
+
+# Run setup.py install - this registers the package
+RUN python setup.py install
+
+
+# # Download Stanza resources for Hebrew
+RUN python -c "import stanza; stanza.download('he')"
+
+
+
+# Create a shell script to run hebpipe and keep container alive
+RUN echo '#!/bin/bash\n\
+if [ "$#" -eq 0 ]; then\n\
+    exec tail -f /dev/null\n\
+else\n\
+    exec python -m hebpipe "$@"\n\
+fi' > /app/run.sh && chmod +x /app/run.sh
+
+# Define the entrypoint for the container
+ENTRYPOINT ["/app/run.sh"] 
